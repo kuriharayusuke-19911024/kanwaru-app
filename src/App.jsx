@@ -1,5 +1,5 @@
+import { supabase } from './supabase.js'
 import { useState } from "react";
-
 const T = {
   green: "#2D6A4F", greenL: "#40916C", greenP: "#D8F3DC",
   earth: "#7F5539", earthL: "#B08968", earthP: "#F5ECD7",
