@@ -119,7 +119,7 @@ function HomeScreen({ posts, markRead, onNav, currentUser, memberNames }) {
           おはようございます 👋
         </div>
         <div style={{ marginTop: 12, display: "flex", gap: 8 }}>
-          {[["今月の勤務","148h"],["有給残日数","12日"],["今日の作業","3件"]].map(([k,v],i) => (
+          {[["今月の勤務","0h"],["有給残日数","—"],["今日の作業","0件"]].map(([k,v],i) => (
             <div key={i} style={{ background: "rgba(255,255,255,0.18)", borderRadius: 12,
               padding: "8px 10px", flex: 1, textAlign: "center" }}>
               <div style={{ fontSize: 10, opacity: 0.8, fontFamily: "'Noto Sans JP', sans-serif" }}>{k}</div>
@@ -172,13 +172,12 @@ function HomeScreen({ posts, markRead, onNav, currentUser, memberNames }) {
       <Card>
         <div style={{ fontWeight: 700, fontSize: 13, color: T.green, fontFamily: "'Noto Sans JP', sans-serif", marginBottom: 10 }}>📍 本日の出退勤</div>
         <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-          <div style={{ width: 44, height: 44, borderRadius: 12, background: T.greenP,
-            display: "flex", alignItems: "center", justifyContent: "center", fontSize: 22 }}>✅</div>
+          <div style={{ width: 44, height: 44, borderRadius: 12, background: T.grayL,
+            display: "flex", alignItems: "center", justifyContent: "center", fontSize: 22 }}>⏱</div>
           <div>
-            <div style={{ fontWeight: 700, fontSize: 14, fontFamily: "'Noto Sans JP', sans-serif" }}>07:00 出勤済み</div>
-            <div style={{ fontSize: 11, color: T.gray, fontFamily: "'Noto Sans JP', sans-serif" }}>📍 牧草圃場 第1区画</div>
+            <div style={{ fontWeight: 700, fontSize: 14, fontFamily: "'Noto Sans JP', sans-serif", color: T.gray }}>未出勤</div>
+            <div style={{ fontSize: 11, color: T.gray, fontFamily: "'Noto Sans JP', sans-serif" }}>出退勤タブから打刻してください</div>
           </div>
-          <div style={{ marginLeft: "auto" }}><Tag label="勤務中" color={T.white} bg={T.green} /></div>
         </div>
       </Card>
 
@@ -257,11 +256,7 @@ function ClockScreen() {
       </Card>
       <Card>
         <div style={{ fontWeight: 700, fontSize: 13, color: T.green, fontFamily: "'Noto Sans JP', sans-serif", marginBottom: 10 }}>📜 今週の履歴</div>
-        {[
-          { day: "月", in: "07:00", out: "17:30", loc: "牧草圃場", hours: 10.5 },
-          { day: "火", in: "07:00", out: "17:00", loc: "米作エリア", hours: 10.0 },
-          { day: "水", in: "07:00", out: "—", loc: "牧草圃場", hours: null },
-        ].map((r,i) => (
+        {[].map((r,i) => (
           <div key={i} style={{ display: "flex", alignItems: "center", gap: 10,
             padding: "8px 0", borderBottom: i < 2 ? `1px solid ${T.grayL}` : "none" }}>
             <div style={{ width: 32, height: 32, borderRadius: 8,
@@ -289,11 +284,7 @@ const DAY_END = "20:00";
 const PX = 0.6;
 
 function WorkScreen({ currentUser }) {
-  const [blocks, setBlocks] = useState([
-    { start: "07:00", end: "08:00", bizId: "makusa", task: "刈り取り",    meetWith: null, locked: false },
-    { start: "08:00", end: "12:00", bizId: "makusa", task: "トラクター",  meetWith: null, locked: false },
-    { start: "12:00", end: "13:00", bizId: "honbu",  task: "会議・打合せ", meetWith: "社内メンバー", locked: false },
-  ]);
+  const [blocks, setBlocks] = useState([]);
   const [open, setOpen]      = useState(true);
   const [tab, setTab]        = useState("today");
   const [dayLocked, setDayLocked] = useState(false); // その日全体の確定フラグ
@@ -340,12 +331,12 @@ function WorkScreen({ currentUser }) {
 
   // 週次・月次・年次モックデータ
   const weeklyData = [
-    { day: "月", works: [{ bizId:"makusa", task:"刈り取り", mins:120 },{ bizId:"makusa", task:"トラクター", mins:180 },{ bizId:"honbu", task:"会議・打合せ", mins:60 }] },
-    { day: "火", works: [{ bizId:"rice",   task:"水管理",   mins:90  },{ bizId:"compost", task:"堆肥散布",  mins:150 }] },
-    { day: "水", works: [{ bizId:"makusa", task:"運搬",     mins:240 },{ bizId:"chiku",   task:"飼育管理",  mins:60  }] },
-    { day: "木", works: [{ bizId:"food",   task:"製造",     mins:180 },{ bizId:"honbu",   task:"事務作業",  mins:120 }] },
-    { day: "金", works: [{ bizId:"kuri",   task:"剪定",     mins:120 },{ bizId:"compost", task:"堆肥製造",  mins:120 },{ bizId:"makusa", task:"畦作業", mins:60 }] },
-    { day: "土", works: [{ bizId:"kuri",   task:"収穫",     mins:180 },{ bizId:"rice",    task:"収穫",      mins:120 }] },
+    { day: "月", works: [] },
+    { day: "火", works: [] },
+    { day: "水", works: [] },
+    { day: "木", works: [] },
+    { day: "金", works: [] },
+    { day: "土", works: [] },
     { day: "日", works: [] },
   ];
 
@@ -356,28 +347,14 @@ function WorkScreen({ currentUser }) {
   }).filter(b => b.total > 0);
 
   // 月次モック
-  const monthlyBiz = [
-    { bizId: "makusa",  mins: 2400 },
-    { bizId: "compost", mins: 1200 },
-    { bizId: "rice",    mins:  960 },
-    { bizId: "honbu",   mins:  720 },
-    { bizId: "food",    mins:  480 },
-    { bizId: "chiku",   mins:  360 },
-    { bizId: "kuri",    mins:  600 },
-  ];
-  const totalMonthly = monthlyBiz.reduce((a, b) => a + b.mins, 0);
+  const monthlyBiz = [];
+  const totalMonthly = 0;
+
+  const yearlyBiz = [];
+  const totalYearly = 0;
 
   // 年次モック（事業別年間合計）
-  const yearlyBiz = [
-    { bizId: "makusa",  mins: 28800 },
-    { bizId: "compost", mins: 14400 },
-    { bizId: "rice",    mins: 11520 },
-    { bizId: "kuri",    mins:  9600 },
-    { bizId: "honbu",   mins:  8640 },
-    { bizId: "food",    mins:  5760 },
-    { bizId: "chiku",   mins:  4320 },
-  ];
-  const totalYearly = yearlyBiz.reduce((a, b) => a + b.mins, 0);
+
 
   // タイムライン
   const TimelineBar = () => (
@@ -639,9 +616,9 @@ function WorkScreen({ currentUser }) {
 
           {/* メンバー別 */}
           {[
-            { name: "栗原 優介", icon: "👨‍🌾", mins: 360, color: T.green },
-            { name: "栗原 直人", icon: "👨‍🌾", mins: 480, color: T.skyL },
-            { name: "秋山 龍之介", icon: "👨‍🔧", mins: 300, color: T.amber },
+            { name: "栗原 優介", icon: "👨‍🌾", mins: 0, color: T.green },
+            { name: "栗原 直人", icon: "👨‍🌾", mins: 0, color: T.skyL },
+            { name: "秋山 龍之介", icon: "👨‍🔧", mins: 0, color: T.amber },
           ].map((m, i) => {
             const h = Math.floor(m.mins / 60);
             const min = m.mins % 60;
@@ -673,7 +650,7 @@ function WorkScreen({ currentUser }) {
               fontWeight: 700, color: T.indigo }}>3人合計</span>
             <span style={{ fontFamily: "'Noto Sans JP', sans-serif", fontSize: 16,
               fontWeight: 800, color: T.indigo }}>
-              {Math.floor((360 + 480 + 300) / 60)}時間{(360 + 480 + 300) % 60 > 0 ? `${(360+480+300)%60}分` : ""}
+              0時間
             </span>
           </div>
         </Card>
@@ -1154,11 +1131,7 @@ function JournalScreen({ posts, setPosts, markRead, currentUser, memberNames }) 
 // ── LEAVE ──
 function LeaveScreen({ currentUser }) {
   const [showForm, setShowForm] = useState(false);
-  const [requests, setRequests] = useState([
-    { date: "2025/03/15", days: 1, status: "承認済", color: T.green },
-    { date: "2025/02/28", days: 2, status: "承認済", color: T.green },
-    { date: "2025/04/01", days: 1, status: "申請中", color: T.warn },
-  ]);
+  const [requests, setRequests] = useState([]);
   const [draft, setDraft] = useState({ date: "", days: "1" });
 
   const usedDays = requests.filter(r => r.status === "承認済").reduce((a, r) => a + r.days, 0);
@@ -1348,20 +1321,7 @@ function LoginScreen({ onLogin }) {
 }
 
 // ── INITIAL POSTS ──
-const INITIAL_POSTS = [
-  { id: 1, name: "栗原 優介", time: "今日 08:45", tag: "報告", color: T.green,
-    content: "牧草圃場第1区画、刈り取り作業を開始しました。天候良好です。",
-    likes: 2, liked: false, comments: ["了解です！"], showComments: false,
-    readBy: ["栗原 優介", "栗原 直人"] },
-  { id: 2, name: "栗原 直人", time: "今日 07:30", tag: "連絡", color: T.skyL,
-    content: "今週の堆肥散布スケジュールを変更します。詳細は添付を確認してください。",
-    likes: 1, liked: false, comments: [], showComments: false,
-    readBy: ["栗原 直人"] },
-  { id: 3, name: "栗原 優介", time: "昨日 17:00", tag: "重要", color: T.danger,
-    content: "明日の全体朝礼は7:00開始です。全員参加でお願いします。",
-    likes: 5, liked: false, comments: ["承知しました"], showComments: false,
-    readBy: ["栗原 優介"] },
-];
+const INITIAL_POSTS = [];
 
 // ── APP ──
 export default function App() {
@@ -1464,4 +1424,3 @@ export default function App() {
     </div>
   );
 }
-
