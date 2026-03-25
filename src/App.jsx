@@ -284,6 +284,35 @@ const DAY_END = "20:00";
 const PX = 0.6;
 
 function WorkScreen({ currentUser }) {
+  // 日付管理
+  const todayStr = (() => {
+    const d = new Date();
+    return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,"0")}-${String(d.getDate()).padStart(2,"0")}`;
+  })();
+  const [selectedDate, setSelectedDate] = useState(todayStr);
+
+  const formatDateLabel = (dateStr) => {
+    const d = new Date(dateStr + "T00:00:00");
+    const diff = Math.round((new Date(todayStr) - d) / 86400000);
+    const dayNames = ["日","月","火","水","木","金","土"];
+    const label = `${d.getMonth()+1}/${d.getDate()}（${dayNames[d.getDay()]}）`;
+    if (diff === 0) return `今日 ${label}`;
+    if (diff === 1) return `昨日 ${label}`;
+    if (diff === -1) return `明日 ${label}`;
+    return label;
+  };
+
+  const goDate = (delta) => {
+    const d = new Date(selectedDate + "T00:00:00");
+    d.setDate(d.getDate() + delta);
+    const str = `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,"0")}-${String(d.getDate()).padStart(2,"0")}`;
+    setSelectedDate(str);
+    setBlocks([]);
+    setDayLocked(false);
+    setOpen(true);
+    setDraft({ bizId: null, task: null, meetWith: null, endTime: null });
+  };
+
   const [blocks, setBlocks] = useState([]);
   const [open, setOpen]      = useState(true);
   const [tab, setTab]        = useState("today");
@@ -433,10 +462,43 @@ function WorkScreen({ currentUser }) {
   return (
     <div style={{ padding: "16px 14px 100px", display: "flex", flexDirection: "column", gap: 12 }}>
 
-      {/* ページヘッダー */}
-      <div style={{ fontWeight: 800, fontSize: 18, color: T.green, fontFamily: "'Noto Sans JP', sans-serif" }}>
-        📊 作業記録
+      {/* ページヘッダー＋日付選択 */}
+      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+        <div style={{ fontWeight: 800, fontSize: 18, color: T.green, fontFamily: "'Noto Sans JP', sans-serif" }}>
+          📊 作業記録
+        </div>
       </div>
+
+      {/* 日付ナビゲーター */}
+      <Card style={{ padding: "10px 14px" }}>
+        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+          <button onClick={() => goDate(-1)} style={{
+            background: T.grayL, border: "none", borderRadius: 10,
+            padding: "8px 14px", fontSize: 16, cursor: "pointer",
+            fontWeight: 700, color: T.gray,
+          }}>‹</button>
+          <div style={{ textAlign: "center" }}>
+            <div style={{ fontWeight: 800, fontSize: 15, color: T.green,
+              fontFamily: "'Noto Sans JP', sans-serif" }}>
+              {formatDateLabel(selectedDate)}
+            </div>
+            {selectedDate !== todayStr && (
+              <button onClick={() => goDate(0) || setSelectedDate(todayStr)} style={{
+                background: "none", border: "none", fontSize: 11,
+                color: T.skyL, cursor: "pointer", fontFamily: "'Noto Sans JP', sans-serif",
+                fontWeight: 700, marginTop: 2, textDecoration: "underline",
+              }} onClick={() => { setSelectedDate(todayStr); setBlocks([]); setDayLocked(false); setOpen(true); setDraft({ bizId: null, task: null, meetWith: null, endTime: null }); }}>
+                今日に戻る
+              </button>
+            )}
+          </div>
+          <button onClick={() => goDate(1)} style={{
+            background: T.grayL, border: "none", borderRadius: 10,
+            padding: "8px 14px", fontSize: 16, cursor: "pointer",
+            fontWeight: 700, color: selectedDate >= todayStr ? "#ccc" : T.gray,
+          }} disabled={selectedDate >= todayStr}>›</button>
+        </div>
+      </Card>
 
       {/* 使い方ガイド（常時表示） */}
       <div style={{
