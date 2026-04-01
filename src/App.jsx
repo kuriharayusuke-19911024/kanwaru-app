@@ -1,5 +1,6 @@
-import { supabase } from './supabase.js'
-import { useState } from "react";
+import { useState, useEffect } from "react";
+import { supabase } from './supabase.js';
+
 const T = {
   green: "#2D6A4F", greenL: "#40916C", greenP: "#D8F3DC",
   earth: "#7F5539", earthL: "#B08968", earthP: "#F5ECD7",
@@ -483,7 +484,7 @@ function WorkScreen({ currentUser }) {
               {formatDateLabel(selectedDate)}
             </div>
             {selectedDate !== todayStr && (
-              <button onClick={() => goDate(0) || setSelectedDate(todayStr)} style={{
+              <button style={{
                 background: "none", border: "none", fontSize: 11,
                 color: T.skyL, cursor: "pointer", fontFamily: "'Noto Sans JP', sans-serif",
                 fontWeight: 700, marginTop: 2, textDecoration: "underline",
@@ -994,36 +995,84 @@ function JournalScreen({ posts, setPosts, markRead, currentUser, memberNames }) 
   const [showForm, setShowForm] = useState(false);
   const [draft, setDraft] = useState({ content: "", tag: "報告" });
   const [commentText, setCommentText] = useState({});
+  const [loading, setLoading] = useState(false);
 
-  const submitPost = () => {
+  // Supabaseから投稿を読み込む
+  useEffect(() => {
+    const loadPosts = async () => {
+      const { data } = await supabase
+        .from('journal_posts')
+        .select('*')
+        .order('created_at', { ascending: false });
+      if (data && data.length > 0) {
+        const formatted = data.map(p => ({
+          id: p.id,
+          name: p.user_name,
+          time: new Date(p.created_at).toLocaleString('ja-JP', { month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit' }),
+          tag: p.tag,
+          color: TAG_COLORS[p.tag] || T.green,
+          content: p.content,
+          likes: p.likes || 0,
+          liked: false,
+          comments: p.comments || [],
+          showComments: false,
+          readBy: p.read_by || [],
+        }));
+        setPosts(formatted);
+      }
+    };
+    loadPosts();
+  }, []);
+
+  const submitPost = async () => {
     if (!draft.content.trim()) return;
+    setLoading(true);
     const col = TAG_COLORS[draft.tag];
-    setPosts(prev => [{
-      id: Date.now(), name: ME, time: "たった今", tag: draft.tag, color: col,
-      content: draft.content, likes: 0, liked: false, comments: [],
-      showComments: false, readBy: [ME],
-    }, ...prev]);
+    const { data } = await supabase
+      .from('journal_posts')
+      .insert([{
+        user_name: ME, tag: draft.tag, content: draft.content,
+        likes: 0, read_by: [ME], comments: [],
+      }])
+      .select();
+    if (data && data[0]) {
+      setPosts(prev => [{
+        id: data[0].id, name: ME, time: "たった今", tag: draft.tag, color: col,
+        content: draft.content, likes: 0, liked: false, comments: [],
+        showComments: false, readBy: [ME],
+      }, ...prev]);
+    }
     setDraft({ content: "", tag: "報告" });
     setShowForm(false);
+    setLoading(false);
   };
 
-  const toggleLike = (id) => {
-    setPosts(prev => prev.map(p => p.id === id
-      ? { ...p, liked: !p.liked, likes: p.liked ? p.likes - 1 : p.likes + 1 }
-      : p));
+  const toggleLike = async (id) => {
+    const post = posts.find(p => p.id === id);
+    if (!post) return;
+    const newLikes = post.liked ? post.likes - 1 : post.likes + 1;
+    await supabase.from('journal_posts').update({ likes: newLikes }).eq('id', id);
+    setPosts(prev => prev.map(p => p.id === id ? { ...p, liked: !p.liked, likes: newLikes } : p));
   };
 
-  const toggleComments = (id) => {
+  const toggleComments = async (id) => {
     setPosts(prev => prev.map(p => p.id === id ? { ...p, showComments: !p.showComments } : p));
-    markRead(id);
+    const post = posts.find(p => p.id === id);
+    if (post && !post.readBy.includes(ME)) {
+      const newReadBy = [...post.readBy, ME];
+      await supabase.from('journal_posts').update({ read_by: newReadBy }).eq('id', id);
+      setPosts(prev => prev.map(p => p.id === id ? { ...p, readBy: newReadBy } : p));
+    }
   };
 
-  const addComment = (id) => {
+  const addComment = async (id) => {
     const text = commentText[id]?.trim();
     if (!text) return;
-    setPosts(prev => prev.map(p => p.id === id
-      ? { ...p, comments: [...p.comments, text] }
-      : p));
+    const post = posts.find(p => p.id === id);
+    if (!post) return;
+    const newComments = [...post.comments, `${ME}: ${text}`];
+    await supabase.from('journal_posts').update({ comments: newComments }).eq('id', id);
+    setPosts(prev => prev.map(p => p.id === id ? { ...p, comments: newComments } : p));
     setCommentText(prev => ({ ...prev, [id]: "" }));
   };
 
@@ -1079,16 +1128,16 @@ function JournalScreen({ posts, setPosts, markRead, currentUser, memberNames }) 
                 fontSize: 13, fontFamily: "'Noto Sans JP', sans-serif",
                 resize: "vertical", outline: "none", boxSizing: "border-box", lineHeight: 1.6 }} />
           </div>
-          <button onClick={submitPost} style={{
-            background: draft.content.trim()
+          <button onClick={submitPost} disabled={loading} style={{
+            background: draft.content.trim() && !loading
               ? `linear-gradient(135deg,${TAG_COLORS[draft.tag]},${TAG_COLORS[draft.tag]}cc)` : T.grayL,
-            color: draft.content.trim() ? "white" : T.gray,
+            color: draft.content.trim() && !loading ? "white" : T.gray,
             border: "none", borderRadius: 12, padding: "13px", width: "100%",
             fontWeight: 800, fontSize: 14,
-            cursor: draft.content.trim() ? "pointer" : "default",
+            cursor: draft.content.trim() && !loading ? "pointer" : "default",
             fontFamily: "'Noto Sans JP', sans-serif",
           }}>
-            {draft.content.trim() ? "✅ 投稿する" : "内容を入力してください"}
+            {loading ? "投稿中..." : draft.content.trim() ? "✅ 投稿する" : "内容を入力してください"}
           </button>
         </Card>
       )}
@@ -1195,19 +1244,51 @@ function LeaveScreen({ currentUser }) {
   const [showForm, setShowForm] = useState(false);
   const [requests, setRequests] = useState([]);
   const [draft, setDraft] = useState({ date: "", days: "1" });
+  const [loading, setLoading] = useState(false);
+
+  // Supabaseから読み込む
+  useEffect(() => {
+    const loadRequests = async () => {
+      const { data } = await supabase
+        .from('leave_requests')
+        .select('*')
+        .eq('user_name', currentUser?.name)
+        .order('created_at', { ascending: false });
+      if (data) {
+        setRequests(data.map(r => ({
+          date: r.date, days: r.days, status: r.status,
+          color: r.status === '承認済' ? T.green : T.warn,
+        })));
+      }
+    };
+    if (currentUser?.name) loadRequests();
+  }, [currentUser]);
 
   const usedDays = requests.filter(r => r.status === "承認済").reduce((a, r) => a + r.days, 0);
   const totalDays = 20;
   const remaining = totalDays - usedDays;
 
-  const submitRequest = () => {
+  const submitRequest = async () => {
     if (!draft.date) return;
-    setRequests(prev => [{
-      date: draft.date, days: Number(draft.days),
-      status: "申請中", color: T.warn,
-    }, ...prev]);
+    setLoading(true);
+    const { data } = await supabase
+      .from('leave_requests')
+      .insert([{
+        user_name: currentUser?.name,
+        date: draft.date,
+        days: Number(draft.days),
+        status: '申請中',
+      }])
+      .select();
+    if (data && data[0]) {
+      setRequests(prev => [{
+        date: draft.date, days: Number(draft.days),
+        status: '申請中', color: T.warn,
+      }, ...prev]);
+    }
     setDraft({ date: "", days: "1" });
     setShowForm(false);
+    setLoading(false);
   };
 
   return (
@@ -1279,15 +1360,15 @@ function LeaveScreen({ currentUser }) {
             </div>
           </div>
 
-          <button onClick={submitRequest} style={{
-            background: draft.date ? `linear-gradient(135deg,${T.green},${T.greenL})` : T.grayL,
-            color: draft.date ? "white" : T.gray,
+          <button onClick={submitRequest} disabled={loading} style={{
+            background: draft.date && !loading ? `linear-gradient(135deg,${T.green},${T.greenL})` : T.grayL,
+            color: draft.date && !loading ? "white" : T.gray,
             border: "none", borderRadius: 12, padding: "13px",
             width: "100%", fontWeight: 800, fontSize: 14,
-            cursor: draft.date ? "pointer" : "default",
+            cursor: draft.date && !loading ? "pointer" : "default",
             fontFamily: "'Noto Sans JP', sans-serif",
           }}>
-            {draft.date ? `✅ ${draft.date}（${draft.days}日間）を申請する` : "日付を選んでください"}
+            {loading ? "申請中..." : draft.date ? `✅ ${draft.date}（${draft.days}日間）を申請する` : "日付を選んでください"}
           </button>
         </Card>
       )}
@@ -1323,30 +1404,27 @@ const MEMBERS = [
 // ── LOGIN SCREEN ──
 function LoginScreen({ onLogin }) {
   return (
-    <div style={{ minHeight: "100vh", background: "#E8F5E9",
-      display: "flex", alignItems: "center", justifyContent: "center", padding: 20 }}>
+    <div style={{ width: "100%", minHeight: "100vh", maxWidth: "480px", margin: "0 auto",
+      position: "relative", backgroundColor: "#f5f5f5",
+      display: "flex", flexDirection: "column", alignItems: "center",
+      justifyContent: "center", padding: "40px 20px" }}>
       <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+JP:wght@400;700;800&display=swap" rel="stylesheet" />
-      <div style={{ width: 375, height: 760, background: T.cream, borderRadius: 44,
-        border: "8px solid #1a1a1a", position: "relative", overflow: "hidden",
-        boxShadow: "0 30px 80px rgba(0,0,0,0.35)",
-        display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center",
-        padding: "40px 24px" }}>
 
         {/* ロゴ */}
         <div style={{ textAlign: "center", marginBottom: 40 }}>
           <div style={{ fontSize: 56, marginBottom: 12 }}>🌾</div>
-          <div style={{ fontSize: 20, fontWeight: 800, color: T.green,
+          <div style={{ fontSize: 24, fontWeight: 800, color: T.green,
             fontFamily: "'Noto Sans JP', sans-serif", lineHeight: 1.4 }}>
             関わるすべてに<br />喜びを
           </div>
-          <div style={{ fontSize: 11, color: T.gray, fontFamily: "'Noto Sans JP', sans-serif", marginTop: 8,
+          <div style={{ fontSize: 12, color: T.gray, fontFamily: "'Noto Sans JP', sans-serif", marginTop: 8,
             background: T.greenP, borderRadius: 20, padding: "4px 14px", display: "inline-block" }}>
             農業・食品事業 業務管理アプリ
           </div>
         </div>
 
         {/* 名前選択 */}
-        <div style={{ width: "100%" }}>
+        <div style={{ width: "100%", maxWidth: 400 }}>
           <div style={{ fontSize: 13, fontWeight: 700, color: T.gray, textAlign: "center",
             fontFamily: "'Noto Sans JP', sans-serif", marginBottom: 16 }}>
             あなたはどちらですか？
@@ -1359,8 +1437,7 @@ function LoginScreen({ onLogin }) {
                 borderRadius: 16, padding: "16px 20px",
                 cursor: "pointer", display: "flex", alignItems: "center", gap: 14,
                 boxShadow: "0 2px 12px rgba(45,106,79,0.08)",
-                transition: "all 0.15s",
-                zIndex: 10, position: "relative",
+                width: "100%",
               }}>
                 <div style={{
                   width: 48, height: 48, borderRadius: "50%",
@@ -1377,7 +1454,6 @@ function LoginScreen({ onLogin }) {
             ))}
           </div>
         </div>
-      </div>
     </div>
   );
 }
@@ -1418,70 +1494,72 @@ export default function App() {
   const unreadImportant = posts.filter(p => p.tag === "重要" && !p.readBy.includes(ME)).length;
 
   return (
-    <div style={{ minHeight: "100vh", background: "#E8F5E9",
-      display: "flex", alignItems: "center", justifyContent: "center", padding: 20 }}>
+    <div style={{ width: "100%", minHeight: "100vh", maxWidth: "480px", margin: "0 auto",
+      position: "relative", backgroundColor: "#f5f5f5" }}>
       <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+JP:wght@400;700;800&display=swap" rel="stylesheet" />
-      <div style={{ width: 375, height: 760, background: T.cream, borderRadius: 44,
-        border: "8px solid #1a1a1a", position: "relative", overflow: "hidden",
-        boxShadow: "0 30px 80px rgba(0,0,0,0.35)" }}>
-        {/* Status bar */}
-        <div style={{ background: T.white, padding: "10px 16px 8px",
-          display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-          <span style={{ fontSize: 12, fontWeight: 700, fontFamily: "monospace" }}>9:41</span>
-          <div style={{ width: 80, height: 20, background: "#1a1a1a", borderRadius: 10,
-            position: "absolute", left: "50%", transform: "translateX(-50%)", top: 8 }} />
-          {/* ユーザー表示＋ログアウト */}
-          <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
-            <span style={{ fontSize: 14 }}>{currentUser.icon}</span>
-            <span style={{ fontSize: 10, fontWeight: 700, color: T.green,
-              fontFamily: "'Noto Sans JP', sans-serif" }}>{currentUser.name.split(" ")[0]}</span>
-            <button onClick={() => { setCurrentUser(null); setScreen("home"); }} style={{
-              background: T.grayL, border: "none", borderRadius: 8,
-              padding: "3px 7px", fontSize: 9, cursor: "pointer",
-              color: T.gray, fontFamily: "'Noto Sans JP', sans-serif",
-              zIndex: 10, position: "relative",
-            }}>退出</button>
-          </div>
+      {/* ステータスバー */}
+      <div style={{ background: T.white, padding: "10px 16px 8px",
+        display: "flex", justifyContent: "space-between", alignItems: "center",
+        position: "sticky", top: 0, zIndex: 100,
+        boxShadow: "0 1px 4px rgba(0,0,0,0.06)" }}>
+        <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+          <span style={{ fontSize: 20 }}>🌾</span>
+          <span style={{ fontSize: 13, fontWeight: 800, color: T.green,
+            fontFamily: "'Noto Sans JP', sans-serif" }}>関わるすべてに喜びを</span>
         </div>
-        <div style={{ height: "calc(100% - 46px)", overflowY: "auto", position: "relative", paddingBottom: 70 }}>
-          {map[screen]}
+        <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+          <span style={{ fontSize: 16 }}>{currentUser.icon}</span>
+          <span style={{ fontSize: 11, fontWeight: 700, color: T.green,
+            fontFamily: "'Noto Sans JP', sans-serif" }}>{currentUser.name.split(" ")[0]}</span>
+          <button onClick={() => { setCurrentUser(null); setScreen("home"); }} style={{
+            background: T.grayL, border: "none", borderRadius: 8,
+            padding: "4px 8px", fontSize: 10, cursor: "pointer",
+            color: T.gray, fontFamily: "'Noto Sans JP', sans-serif",
+          }}>退出</button>
         </div>
-        {/* Navbar */}
-        <div style={{ position: "absolute", bottom: 0, left: 0, right: 0,
-          background: T.white, borderTop: `1.5px solid ${T.greenP}`,
-          display: "flex", justifyContent: "space-around",
-          padding: "8px 0 14px", zIndex: 1000,
-          boxShadow: "0 -2px 12px rgba(0,0,0,0.08)" }}>
-          {[
-            { id: "home",    icon: "🏠", label: "ホーム" },
-            { id: "clock",   icon: "⏱",  label: "出退勤" },
-            { id: "work",    icon: "🌾", label: "作業記録" },
-            { id: "journal", icon: "📋", label: "日誌", badge: unreadImportant },
-            { id: "leave",   icon: "📅", label: "有給" },
-          ].map(it => (
-            <button key={it.id} onClick={() => setScreen(it.id)} style={{
-              display: "flex", flexDirection: "column", alignItems: "center",
-              background: "none", border: "none", cursor: "pointer", gap: 2, minWidth: 48,
-              position: "relative",
-            }}>
-              <span style={{ fontSize: 20 }}>{it.icon}</span>
-              {it.badge > 0 && (
-                <div style={{ position: "absolute", top: -2, right: 6,
-                  background: T.danger, color: "white", borderRadius: "50%",
-                  width: 16, height: 16, fontSize: 9, fontWeight: 800,
-                  display: "flex", alignItems: "center", justifyContent: "center" }}>
-                  {it.badge}
-                </div>
-              )}
-              <span style={{ fontSize: 10, fontFamily: "'Noto Sans JP', sans-serif",
-                fontWeight: screen === it.id ? 700 : 400,
-                color: screen === it.id ? T.green : T.gray }}>
-                {it.label}
-              </span>
-              {screen === it.id && <div style={{ width: 4, height: 4, borderRadius: "50%", background: T.green }} />}
-            </button>
-          ))}
-        </div>
+      </div>
+
+      {/* メインコンテンツ */}
+      <div style={{ paddingBottom: "70px" }}>
+        {map[screen]}
+      </div>
+
+      {/* ナビゲーションバー */}
+      <div style={{ position: "fixed", bottom: 0, left: "50%", transform: "translateX(-50%)",
+        width: "100%", maxWidth: "480px",
+        backgroundColor: "#fff", borderTop: `1.5px solid ${T.greenP}`,
+        display: "flex", justifyContent: "space-around",
+        padding: "8px 0 20px", zIndex: 1000,
+        boxShadow: "0 -2px 12px rgba(0,0,0,0.08)" }}>
+        {[
+          { id: "home",    icon: "🏠", label: "ホーム" },
+          { id: "clock",   icon: "⏱",  label: "出退勤" },
+          { id: "work",    icon: "🌾", label: "作業記録" },
+          { id: "journal", icon: "📋", label: "日誌", badge: unreadImportant },
+          { id: "leave",   icon: "📅", label: "有給" },
+        ].map(it => (
+          <button key={it.id} onClick={() => setScreen(it.id)} style={{
+            display: "flex", flexDirection: "column", alignItems: "center",
+            background: "none", border: "none", cursor: "pointer", gap: 2,
+            minWidth: 48, position: "relative",
+          }}>
+            <span style={{ fontSize: 22 }}>{it.icon}</span>
+            {it.badge > 0 && (
+              <div style={{ position: "absolute", top: -2, right: 4,
+                background: T.danger, color: "white", borderRadius: "50%",
+                width: 16, height: 16, fontSize: 9, fontWeight: 800,
+                display: "flex", alignItems: "center", justifyContent: "center" }}>
+                {it.badge}
+              </div>
+            )}
+            <span style={{ fontSize: 10, fontFamily: "'Noto Sans JP', sans-serif",
+              fontWeight: screen === it.id ? 700 : 400,
+              color: screen === it.id ? T.green : T.gray }}>
+              {it.label}
+            </span>
+            {screen === it.id && <div style={{ width: 4, height: 4, borderRadius: "50%", background: T.green }} />}
+          </button>
+        ))}
       </div>
     </div>
   );
