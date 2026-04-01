@@ -1000,6 +1000,7 @@ function JournalScreen({ posts, setPosts, markRead, currentUser, memberNames }) 
   // Supabaseから投稿を読み込む
   useEffect(() => {
     const loadPosts = async () => {
+      if (!supabase) return;
       const { data } = await supabase
         .from('journal_posts')
         .select('*')
@@ -1026,6 +1027,7 @@ function JournalScreen({ posts, setPosts, markRead, currentUser, memberNames }) 
 
   const submitPost = async () => {
     if (!draft.content.trim()) return;
+    if (!supabase) return;
     setLoading(true);
     const col = TAG_COLORS[draft.tag];
     const { data } = await supabase
@@ -1051,7 +1053,7 @@ function JournalScreen({ posts, setPosts, markRead, currentUser, memberNames }) 
     const post = posts.find(p => p.id === id);
     if (!post) return;
     const newLikes = post.liked ? post.likes - 1 : post.likes + 1;
-    await supabase.from('journal_posts').update({ likes: newLikes }).eq('id', id);
+    if (supabase) await supabase.from('journal_posts').update({ likes: newLikes }).eq('id', id);
     setPosts(prev => prev.map(p => p.id === id ? { ...p, liked: !p.liked, likes: newLikes } : p));
   };
 
@@ -1060,7 +1062,7 @@ function JournalScreen({ posts, setPosts, markRead, currentUser, memberNames }) 
     const post = posts.find(p => p.id === id);
     if (post && !post.readBy.includes(ME)) {
       const newReadBy = [...post.readBy, ME];
-      await supabase.from('journal_posts').update({ read_by: newReadBy }).eq('id', id);
+      if (supabase) await supabase.from('journal_posts').update({ read_by: newReadBy }).eq('id', id);
       setPosts(prev => prev.map(p => p.id === id ? { ...p, readBy: newReadBy } : p));
     }
   };
@@ -1071,7 +1073,7 @@ function JournalScreen({ posts, setPosts, markRead, currentUser, memberNames }) 
     const post = posts.find(p => p.id === id);
     if (!post) return;
     const newComments = [...post.comments, `${ME}: ${text}`];
-    await supabase.from('journal_posts').update({ comments: newComments }).eq('id', id);
+    if (supabase) await supabase.from('journal_posts').update({ comments: newComments }).eq('id', id);
     setPosts(prev => prev.map(p => p.id === id ? { ...p, comments: newComments } : p));
     setCommentText(prev => ({ ...prev, [id]: "" }));
   };
@@ -1249,6 +1251,7 @@ function LeaveScreen({ currentUser }) {
   // Supabaseから読み込む
   useEffect(() => {
     const loadRequests = async () => {
+      if (!supabase) return;
       const { data } = await supabase
         .from('leave_requests')
         .select('*')
@@ -1270,6 +1273,7 @@ function LeaveScreen({ currentUser }) {
 
   const submitRequest = async () => {
     if (!draft.date) return;
+    if (!supabase) return;
     setLoading(true);
     const { data } = await supabase
       .from('leave_requests')
