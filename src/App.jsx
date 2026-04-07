@@ -47,6 +47,57 @@ function durationLabel(s, e) {
   return h > 0 ? (m > 0 ? `${h}時間${m}分` : `${h}時間`) : `${m}分`;
 }
 
+// ── localStorage helpers ──
+function getTodayKey() {
+  const d = new Date();
+  return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,"0")}-${String(d.getDate()).padStart(2,"0")}`;
+}
+function getClockData(userName, dateKey) {
+  try {
+    const raw = localStorage.getItem(`clock_${dateKey}_${userName}`);
+    return raw ? JSON.parse(raw) : null;
+  } catch { return null; }
+}
+function setClockData(userName, dateKey, data) {
+  localStorage.setItem(`clock_${dateKey}_${userName}`, JSON.stringify(data));
+}
+function getWorkBlocks(userName, dateKey) {
+  try {
+    const raw = localStorage.getItem(`work_${dateKey}_${userName}`);
+    return raw ? JSON.parse(raw) : [];
+  } catch { return []; }
+}
+function saveWorkBlocks(userName, dateKey, blocks) {
+  localStorage.setItem(`work_${dateKey}_${userName}`, JSON.stringify(blocks));
+}
+function getWeekDates(baseDate) {
+  const d = new Date(baseDate + "T00:00:00");
+  const day = d.getDay();
+  const mon = new Date(d);
+  mon.setDate(d.getDate() - ((day + 6) % 7));
+  const dates = [];
+  for (let i = 0; i < 7; i++) {
+    const dd = new Date(mon);
+    dd.setDate(mon.getDate() + i);
+    dates.push(`${dd.getFullYear()}-${String(dd.getMonth()+1).padStart(2,"0")}-${String(dd.getDate()).padStart(2,"0")}`);
+  }
+  return dates;
+}
+function getMonthDates(baseDate) {
+  const d = new Date(baseDate + "T00:00:00");
+  const year = d.getFullYear(), month = d.getMonth();
+  const dates = [];
+  const last = new Date(year, month + 1, 0).getDate();
+  for (let i = 1; i <= last; i++) {
+    dates.push(`${year}-${String(month+1).padStart(2,"0")}-${String(i).padStart(2,"0")}`);
+  }
+  return dates;
+}
+function nowHHMM() {
+  const d = new Date();
+  return `${String(d.getHours()).padStart(2,"0")}:${String(d.getMinutes()).padStart(2,"0")}`;
+}
+
 function Card({ children, style = {} }) {
   return (
     <div style={{ background: T.white, borderRadius: 16, padding: "14px 16px",
@@ -120,7 +171,17 @@ function HomeScreen({ posts, markRead, onNav, currentUser, memberNames }) {
           おはようございます 👋
         </div>
         <div style={{ marginTop: 12, display: "flex", gap: 8 }}>
-          {[["今月の勤務","0h"],["有給残日数","—"],["今日の作業","0件"]].map(([k,v],i) => (
+          {(() => {
+            const todayKey = getTodayKey();
+            const monthDts = getMonthDates(todayKey);
+            let monthMins = 0;
+            monthDts.forEach(dk => {
+              const saved = getWorkBlocks(ME, dk);
+              saved.forEach(b => { monthMins += toMin(b.end) - toMin(b.start); });
+            });
+            const todayBlocks = getWorkBlocks(ME, todayKey);
+            return [["今月の勤務",`${Math.floor(monthMins/60)}h`],["有給残日数","—"],["今日の作業",`${todayBlocks.length}件`]];
+          })().map(([k,v],i) => (
             <div key={i} style={{ background: "rgba(255,255,255,0.18)", borderRadius: 12,
               padding: "8px 10px", flex: 1, textAlign: "center" }}>
               <div style={{ fontSize: 10, opacity: 0.8, fontFamily: "'Noto Sans JP', sans-serif" }}>{k}</div>
@@ -172,14 +233,29 @@ function HomeScreen({ posts, markRead, onNav, currentUser, memberNames }) {
       {/* 出退勤 */}
       <Card>
         <div style={{ fontWeight: 700, fontSize: 13, color: T.green, fontFamily: "'Noto Sans JP', sans-serif", marginBottom: 10 }}>📍 本日の出退勤</div>
-        <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-          <div style={{ width: 44, height: 44, borderRadius: 12, background: T.grayL,
-            display: "flex", alignItems: "center", justifyContent: "center", fontSize: 22 }}>⏱</div>
-          <div>
-            <div style={{ fontWeight: 700, fontSize: 14, fontFamily: "'Noto Sans JP', sans-serif", color: T.gray }}>未出勤</div>
-            <div style={{ fontSize: 11, color: T.gray, fontFamily: "'Noto Sans JP', sans-serif" }}>出退勤タブから打刻してください</div>
-          </div>
-        </div>
+        {(() => {
+          const todayKey = getTodayKey();
+          const cd = getClockData(ME, todayKey);
+          const st = cd?.clockOut ? "done" : cd?.clockIn ? "working" : "none";
+          return (
+            <div style={{ display: "flex", alignItems: "center", gap: 10, cursor: "pointer" }} onClick={() => onNav("clock")}>
+              <div style={{ width: 44, height: 44, borderRadius: 12,
+                background: st === "working" ? T.greenP : T.grayL,
+                display: "flex", alignItems: "center", justifyContent: "center", fontSize: 22 }}>
+                {st === "working" ? "🟢" : st === "done" ? "⚫" : "⏱"}
+              </div>
+              <div>
+                <div style={{ fontWeight: 700, fontSize: 14, fontFamily: "'Noto Sans JP', sans-serif",
+                  color: st === "working" ? T.green : T.gray }}>
+                  {st === "working" ? "勤務中" : st === "done" ? "退勤済み" : "未出勤"}
+                </div>
+                <div style={{ fontSize: 11, color: T.gray, fontFamily: "'Noto Sans JP', sans-serif" }}>
+                  {cd?.clockIn ? `${cd.clockIn} 〜 ${cd.clockOut || "進行中"}` : "出退勤タブから打刻してください"}
+                </div>
+              </div>
+            </div>
+          );
+        })()}
       </Card>
 
       {/* 最新の日誌・連絡 */}
@@ -216,50 +292,150 @@ function HomeScreen({ posts, markRead, onNav, currentUser, memberNames }) {
 }
 
 // ── CLOCK ──
-function ClockScreen() {
-  const [clocked, setClocked] = useState(true);
+function ClockScreen({ currentUser }) {
+  const ME = currentUser?.name || "";
+  const todayKey = getTodayKey();
+  const [clockState, setClockState] = useState(() => getClockData(ME, todayKey));
+  const [, setTick] = useState(0);
+
+  // 1分ごとに再レンダリングして経過時間を更新
+  useEffect(() => {
+    const iv = setInterval(() => setTick(t => t + 1), 60000);
+    return () => clearInterval(iv);
+  }, []);
+
+  const status = clockState?.clockOut ? "done" : clockState?.clockIn ? "working" : "none";
+
+  const handleClock = () => {
+    if (status === "none") {
+      const data = { clockIn: nowHHMM(), clockOut: null };
+      setClockData(ME, todayKey, data);
+      setClockState(data);
+    } else if (status === "working") {
+      const data = { ...clockState, clockOut: nowHHMM() };
+      setClockData(ME, todayKey, data);
+      setClockState(data);
+    }
+  };
+
+  // 勤務時間計算
+  const workDuration = () => {
+    if (!clockState?.clockIn) return "";
+    const end = clockState.clockOut || nowHHMM();
+    const diff = toMin(end) - toMin(clockState.clockIn);
+    if (diff <= 0) return "";
+    const h = Math.floor(diff / 60), m = diff % 60;
+    return h > 0 ? (m > 0 ? `${h}時間${m}分` : `${h}時間`) : `${m}分`;
+  };
+
+  // 今週の履歴
+  const weekDates = getWeekDates(todayKey);
+  const dayNames = ["日","月","火","水","木","金","土"];
+  const weekHistory = weekDates.map(dateKey => {
+    const cd = getClockData(ME, dateKey);
+    const d = new Date(dateKey + "T00:00:00");
+    const dayName = dayNames[d.getDay()];
+    if (!cd || !cd.clockIn) return { day: dayName, dateKey, in: null, out: null, hours: null };
+    const inT = cd.clockIn;
+    const outT = cd.clockOut;
+    let hours = null;
+    if (outT) {
+      const diff = toMin(outT) - toMin(inT);
+      hours = (diff / 60).toFixed(1);
+    }
+    return { day: dayName, dateKey, in: inT, out: outT || "進行中", hours };
+  }).filter(r => r.in);
+
   return (
     <div style={{ padding: "16px 14px 100px", display: "flex", flexDirection: "column", gap: 12 }}>
       <div style={{ fontWeight: 800, fontSize: 18, color: T.green, fontFamily: "'Noto Sans JP', sans-serif" }}>⏱ 出退勤</div>
-      <Card style={{ padding: 0, overflow: "hidden" }}>
-        <div style={{ height: 150, background: "linear-gradient(160deg,#c8e6c9,#a5d6a7,#66bb6a)",
-          position: "relative", display: "flex", alignItems: "center", justifyContent: "center" }}>
-          {[0,1,2,3].map(i => <div key={i} style={{ position: "absolute", left: `${i*33}%`, top: 0, bottom: 0, width: 1, background: "rgba(255,255,255,0.3)" }} />)}
-          {[0,1,2].map(i => <div key={i} style={{ position: "absolute", top: `${i*50}%`, left: 0, right: 0, height: 1, background: "rgba(255,255,255,0.3)" }} />)}
-          <div style={{ textAlign: "center" }}>
-            <div style={{ background: T.green, color: "white", borderRadius: "50% 50% 50% 0",
-              transform: "rotate(-45deg)", width: 34, height: 34, display: "flex",
-              alignItems: "center", justifyContent: "center", boxShadow: "0 4px 12px rgba(0,0,0,0.3)", margin: "0 auto" }}>
-              <span style={{ transform: "rotate(45deg)", fontSize: 16 }}>📍</span>
-            </div>
-            <div style={{ marginTop: 4, background: "rgba(255,255,255,0.9)", borderRadius: 8,
-              padding: "2px 8px", fontSize: 11, fontFamily: "'Noto Sans JP', sans-serif", fontWeight: 700 }}>牧草圃場 第1区画</div>
-          </div>
-        </div>
-        <div style={{ padding: "10px 14px", display: "flex", alignItems: "center", gap: 8 }}>
-          <span>📍</span>
-          <span style={{ fontSize: 11, fontFamily: "'Noto Sans JP', sans-serif", color: T.gray }}>現在地: 北海道〇〇市〇〇町 牧草圃場エリア</span>
-        </div>
-      </Card>
+
       <Card style={{ textAlign: "center", padding: "20px 14px" }}>
         <div style={{ fontSize: 11, color: T.gray, fontFamily: "'Noto Sans JP', sans-serif" }}>現在のステータス</div>
-        <div style={{ fontSize: 22, fontWeight: 800, marginTop: 4, color: clocked ? T.green : T.gray, fontFamily: "'Noto Sans JP', sans-serif" }}>
-          {clocked ? "🟢 勤務中" : "⚫ 退勤済み"}
+        <div style={{ fontSize: 22, fontWeight: 800, marginTop: 4,
+          color: status === "working" ? T.green : status === "done" ? T.gray : T.gray,
+          fontFamily: "'Noto Sans JP', sans-serif" }}>
+          {status === "working" ? "🟢 勤務中" : status === "done" ? "⚫ 退勤済み" : "⬜ 未出勤"}
         </div>
-        {clocked && <div style={{ fontSize: 30, fontWeight: 800, letterSpacing: 2, margin: "10px 0", fontFamily: "monospace" }}>07:00 〜 <span style={{ color: T.green }}>進行中</span></div>}
-        <button onClick={() => setClocked(!clocked)} style={{
-          marginTop: 8,
-          background: clocked ? `linear-gradient(135deg,${T.danger},#EF4444)` : `linear-gradient(135deg,${T.green},${T.greenL})`,
-          color: "white", border: "none", borderRadius: 50,
-          padding: "14px 44px", fontSize: 17, fontWeight: 800, cursor: "pointer",
-          boxShadow: "0 4px 20px rgba(0,0,0,0.2)", fontFamily: "'Noto Sans JP', sans-serif",
-        }}>{clocked ? "退勤する" : "出勤する"}</button>
+        {clockState?.clockIn && (
+          <div style={{ fontSize: 28, fontWeight: 800, letterSpacing: 2, margin: "10px 0", fontFamily: "monospace" }}>
+            {clockState.clockIn} 〜 {clockState.clockOut ? (
+              <span style={{ color: T.gray }}>{clockState.clockOut}</span>
+            ) : (
+              <span style={{ color: T.green }}>進行中</span>
+            )}
+          </div>
+        )}
+        {clockState?.clockIn && (
+          <div style={{ fontSize: 14, color: T.green, fontWeight: 700, fontFamily: "'Noto Sans JP', sans-serif", marginBottom: 8 }}>
+            勤務時間: {workDuration()}
+          </div>
+        )}
+        {status !== "done" && (
+          <button onClick={handleClock} style={{
+            marginTop: 8,
+            background: status === "working"
+              ? `linear-gradient(135deg,${T.danger},#EF4444)`
+              : `linear-gradient(135deg,${T.green},${T.greenL})`,
+            color: "white", border: "none", borderRadius: 50,
+            padding: "14px 44px", fontSize: 17, fontWeight: 800, cursor: "pointer",
+            boxShadow: "0 4px 20px rgba(0,0,0,0.2)", fontFamily: "'Noto Sans JP', sans-serif",
+          }}>{status === "working" ? "退勤する" : "出勤する"}</button>
+        )}
+        {status === "done" && (
+          <div style={{ marginTop: 8, padding: "8px 16px", background: T.greenP, borderRadius: 10,
+            fontSize: 12, color: T.green, fontWeight: 700, fontFamily: "'Noto Sans JP', sans-serif" }}>
+            本日の勤務は完了しました
+          </div>
+        )}
       </Card>
+
+      {/* チーム出退勤状況（今日） */}
+      <Card>
+        <div style={{ fontWeight: 700, fontSize: 13, color: T.indigo, fontFamily: "'Noto Sans JP', sans-serif", marginBottom: 10 }}>
+          👥 チームの出退勤（今日）
+        </div>
+        {MEMBERS.map((m, i) => {
+          const cd = getClockData(m.name, todayKey);
+          const st = cd?.clockOut ? "done" : cd?.clockIn ? "working" : "none";
+          let dur = "";
+          if (cd?.clockIn) {
+            const end = cd.clockOut || nowHHMM();
+            const diff = toMin(end) - toMin(cd.clockIn);
+            if (diff > 0) {
+              const h = Math.floor(diff / 60), mm = diff % 60;
+              dur = h > 0 ? (mm > 0 ? `${h}h${mm}m` : `${h}h`) : `${mm}m`;
+            }
+          }
+          return (
+            <div key={i} style={{ display: "flex", alignItems: "center", gap: 10,
+              padding: "8px 0", borderBottom: i < MEMBERS.length - 1 ? `1px solid ${T.grayL}` : "none" }}>
+              <span style={{ fontSize: 20 }}>{m.icon}</span>
+              <div style={{ flex: 1 }}>
+                <div style={{ fontWeight: 700, fontSize: 13, fontFamily: "'Noto Sans JP', sans-serif" }}>{m.name}</div>
+                <div style={{ fontSize: 11, color: T.gray, fontFamily: "'Noto Sans JP', sans-serif" }}>
+                  {cd?.clockIn ? `${cd.clockIn} 〜 ${cd.clockOut || "進行中"}` : "未出勤"}
+                </div>
+              </div>
+              <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                {dur && <span style={{ fontSize: 12, fontWeight: 700, color: m.color, fontFamily: "'Noto Sans JP', sans-serif" }}>{dur}</span>}
+                <div style={{ width: 10, height: 10, borderRadius: "50%",
+                  background: st === "working" ? "#22c55e" : st === "done" ? T.gray : "#e5e7eb" }} />
+              </div>
+            </div>
+          );
+        })}
+      </Card>
+
+      {/* 今週の履歴 */}
       <Card>
         <div style={{ fontWeight: 700, fontSize: 13, color: T.green, fontFamily: "'Noto Sans JP', sans-serif", marginBottom: 10 }}>📜 今週の履歴</div>
-        {[].map((r,i) => (
+        {weekHistory.length === 0 && (
+          <div style={{ fontSize: 12, color: T.gray, fontFamily: "'Noto Sans JP', sans-serif" }}>今週の出勤記録はまだありません</div>
+        )}
+        {weekHistory.map((r, i) => (
           <div key={i} style={{ display: "flex", alignItems: "center", gap: 10,
-            padding: "8px 0", borderBottom: i < 2 ? `1px solid ${T.grayL}` : "none" }}>
+            padding: "8px 0", borderBottom: i < weekHistory.length - 1 ? `1px solid ${T.grayL}` : "none" }}>
             <div style={{ width: 32, height: 32, borderRadius: 8,
               background: r.hours ? T.greenP : T.earthP,
               display: "flex", alignItems: "center", justifyContent: "center",
@@ -267,7 +443,6 @@ function ClockScreen() {
               fontFamily: "'Noto Sans JP', sans-serif" }}>{r.day}</div>
             <div style={{ flex: 1 }}>
               <div style={{ fontSize: 12, fontFamily: "'Noto Sans JP', sans-serif" }}>{r.in} 〜 {r.out}</div>
-              <div style={{ fontSize: 10, color: T.gray, fontFamily: "'Noto Sans JP', sans-serif" }}>📍 {r.loc}</div>
             </div>
             <div style={{ fontWeight: 700, fontSize: 13, color: T.green, fontFamily: "'Noto Sans JP', sans-serif" }}>
               {r.hours ? `${r.hours}h` : "勤務中"}
@@ -308,16 +483,22 @@ function WorkScreen({ currentUser }) {
     d.setDate(d.getDate() + delta);
     const str = `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,"0")}-${String(d.getDate()).padStart(2,"0")}`;
     setSelectedDate(str);
-    setBlocks([]);
-    setDayLocked(false);
-    setOpen(true);
+    const saved = getWorkBlocks(ME, str);
+    setBlocks(saved);
+    const locked = saved.length > 0 && saved.every(b => b.locked);
+    setDayLocked(locked);
+    setOpen(!locked && saved.length === 0);
     setDraft({ bizId: null, task: null, meetWith: null, endTime: null });
   };
 
-  const [blocks, setBlocks] = useState([]);
+  const ME = currentUser?.name || "";
+  const [blocks, setBlocks] = useState(() => getWorkBlocks(ME, selectedDate));
   const [open, setOpen]      = useState(true);
   const [tab, setTab]        = useState("today");
-  const [dayLocked, setDayLocked] = useState(false); // その日全体の確定フラグ
+  const [dayLocked, setDayLocked] = useState(() => {
+    const saved = getWorkBlocks(ME, selectedDate);
+    return saved.length > 0 && saved.every(b => b.locked);
+  });
   const [draft, setDraft]    = useState({ bizId: null, task: null, meetWith: null, endTime: null });
 
   const nextStart = blocks.length > 0 ? blocks[blocks.length - 1].end : CLOCKIN;
@@ -335,23 +516,29 @@ function WorkScreen({ currentUser }) {
 
   const confirmBlock = () => {
     if (!canRecord) return;
-    setBlocks(prev => [...prev, {
+    const newBlock = {
       start: nextStart, end: draft.endTime,
       bizId: draft.bizId, task: draft.task, meetWith: draft.meetWith, locked: false,
-    }]);
+    };
+    const updated = [...blocks, newBlock];
+    setBlocks(updated);
+    saveWorkBlocks(ME, selectedDate, updated);
     setDraft({ bizId: null, task: null, meetWith: null, endTime: null });
-    setOpen(false); // 記録後はいったん閉じて「次を追加」ボタンを表示
+    setOpen(false);
   };
 
-  // 1件だけ削除（一時保存中のみ可）
   const deleteBlock = (idx) => {
     if (dayLocked) return;
-    setBlocks(prev => prev.filter((_, i) => i !== idx));
+    const updated = blocks.filter((_, i) => i !== idx);
+    setBlocks(updated);
+    saveWorkBlocks(ME, selectedDate, updated);
   };
 
-  // その日全体を確定送信
   const confirmDay = () => {
     if (blocks.length === 0) return;
+    const locked = blocks.map(b => ({ ...b, locked: true }));
+    setBlocks(locked);
+    saveWorkBlocks(ME, selectedDate, locked);
     setDayLocked(true);
     setOpen(false);
   };
@@ -359,31 +546,59 @@ function WorkScreen({ currentUser }) {
   const dayStart = toMin(CLOCKIN);
   const totalMin = toMin(DAY_END) - dayStart;
 
-  // 週次・月次・年次モックデータ
-  const weeklyData = [
-    { day: "月", works: [] },
-    { day: "火", works: [] },
-    { day: "水", works: [] },
-    { day: "木", works: [] },
-    { day: "金", works: [] },
-    { day: "土", works: [] },
-    { day: "日", works: [] },
-  ];
+  // 週次データ（localStorageから読み込み）
+  const weekDates = getWeekDates(selectedDate);
+  const dayNameMap = ["日","月","火","水","木","金","土"];
+  const weeklyData = weekDates.map(dateKey => {
+    const saved = getWorkBlocks(ME, dateKey);
+    const works = saved.map(b => ({
+      bizId: b.bizId, task: b.task,
+      mins: toMin(b.end) - toMin(b.start),
+    }));
+    const d = new Date(dateKey + "T00:00:00");
+    return { day: dayNameMap[d.getDay()], dateKey, works };
+  });
 
-  // 週次集計（事業別合計）
   const weeklyBizTotals = BIZ.map(b => {
     const total = weeklyData.flatMap(d => d.works).filter(w => w.bizId === b.id).reduce((a, w) => a + w.mins, 0);
     return { ...b, total };
   }).filter(b => b.total > 0);
 
-  // 月次モック
-  const monthlyBiz = [];
-  const totalMonthly = 0;
+  // 月次データ（localStorageから読み込み）
+  const monthDates = getMonthDates(selectedDate);
+  const allMonthBlocks = monthDates.flatMap(dateKey => {
+    const saved = getWorkBlocks(ME, dateKey);
+    return saved.map(b => ({ bizId: b.bizId, mins: toMin(b.end) - toMin(b.start) }));
+  });
+  const monthlyBizMap = {};
+  allMonthBlocks.forEach(b => {
+    if (!monthlyBizMap[b.bizId]) monthlyBizMap[b.bizId] = 0;
+    monthlyBizMap[b.bizId] += b.mins;
+  });
+  const monthlyBiz = Object.keys(monthlyBizMap).map(bizId => ({ bizId, mins: monthlyBizMap[bizId] }));
+  const totalMonthly = allMonthBlocks.reduce((a, b) => a + b.mins, 0);
 
-  const yearlyBiz = [];
-  const totalYearly = 0;
-
-  // 年次モック（事業別年間合計）
+  // 年次は月次と同じ構造だが12ヶ月分
+  const yearStart = new Date(selectedDate + "T00:00:00");
+  const fy = yearStart.getMonth() >= 3 ? yearStart.getFullYear() : yearStart.getFullYear() - 1;
+  const allYearBlocks = [];
+  for (let m = 0; m < 12; m++) {
+    const mm = ((3 + m) % 12);
+    const yy = mm < 3 ? fy + 1 : fy;
+    const daysInMonth = new Date(yy, mm + 1, 0).getDate();
+    for (let d = 1; d <= daysInMonth; d++) {
+      const dk = `${yy}-${String(mm+1).padStart(2,"0")}-${String(d).padStart(2,"0")}`;
+      const saved = getWorkBlocks(ME, dk);
+      saved.forEach(b => allYearBlocks.push({ bizId: b.bizId, mins: toMin(b.end) - toMin(b.start) }));
+    }
+  }
+  const yearlyBizMap = {};
+  allYearBlocks.forEach(b => {
+    if (!yearlyBizMap[b.bizId]) yearlyBizMap[b.bizId] = 0;
+    yearlyBizMap[b.bizId] += b.mins;
+  });
+  const yearlyBiz = Object.keys(yearlyBizMap).map(bizId => ({ bizId, mins: yearlyBizMap[bizId] }));
+  const totalYearly = allYearBlocks.reduce((a, b) => a + b.mins, 0);
 
 
   // タイムライン
@@ -488,7 +703,15 @@ function WorkScreen({ currentUser }) {
                 background: "none", border: "none", fontSize: 11,
                 color: T.skyL, cursor: "pointer", fontFamily: "'Noto Sans JP', sans-serif",
                 fontWeight: 700, marginTop: 2, textDecoration: "underline",
-              }} onClick={() => { setSelectedDate(todayStr); setBlocks([]); setDayLocked(false); setOpen(true); setDraft({ bizId: null, task: null, meetWith: null, endTime: null }); }}>
+              }} onClick={() => {
+                setSelectedDate(todayStr);
+                const saved = getWorkBlocks(ME, todayStr);
+                setBlocks(saved);
+                const locked = saved.length > 0 && saved.every(b => b.locked);
+                setDayLocked(locked);
+                setOpen(!locked && saved.length === 0);
+                setDraft({ bizId: null, task: null, meetWith: null, endTime: null });
+              }}>
                 今日に戻る
               </button>
             )}
@@ -669,55 +892,58 @@ function WorkScreen({ currentUser }) {
         <TimelineBar />
       )}
 
-      {/* 👑 管理者専用：チーム全体の集計（栗原優介のみ表示） */}
-      {currentUser?.name === "栗原 優介" && (
-        <Card style={{ borderLeft: `4px solid ${T.indigo}` }}>
-          <div style={{ fontWeight: 700, fontSize: 13, color: T.indigo,
-            fontFamily: "'Noto Sans JP', sans-serif", marginBottom: 12 }}>
-            👑 チーム全体の稼働（今日）
-          </div>
+      {/* 👑 チーム全体の集計 */}
+      <Card style={{ borderLeft: `4px solid ${T.indigo}` }}>
+        <div style={{ fontWeight: 700, fontSize: 13, color: T.indigo,
+          fontFamily: "'Noto Sans JP', sans-serif", marginBottom: 12 }}>
+          👥 チーム全体の稼働（今日）
+        </div>
 
-          {/* メンバー別 */}
-          {[
-            { name: "栗原 優介", icon: "👨‍🌾", mins: 0, color: T.green },
-            { name: "栗原 直人", icon: "👨‍🌾", mins: 0, color: T.skyL },
-            { name: "秋山 龍之介", icon: "👨‍🔧", mins: 0, color: T.amber },
-          ].map((m, i) => {
-            const h = Math.floor(m.mins / 60);
-            const min = m.mins % 60;
-            const pct = Math.round((m.mins / 480) * 100);
-            return (
-              <div key={i} style={{ marginBottom: 10 }}>
-                <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 3 }}>
-                  <span style={{ fontSize: 12, fontFamily: "'Noto Sans JP', sans-serif" }}>
-                    {m.icon} {m.name}
-                  </span>
-                  <span style={{ fontSize: 12, fontWeight: 700, color: m.color,
-                    fontFamily: "'Noto Sans JP', sans-serif" }}>
-                    {h}h{min > 0 ? `${min}m` : ""}
-                  </span>
-                </div>
-                <div style={{ height: 7, background: T.grayL, borderRadius: 4, overflow: "hidden" }}>
-                  <div style={{ width: `${Math.min(pct, 100)}%`, height: "100%",
-                    background: m.color, borderRadius: 4 }} />
-                </div>
+        {MEMBERS.map((m, i) => {
+          const memberBlocks = getWorkBlocks(m.name, todayStr);
+          const totalMins = memberBlocks.reduce((a, b) => a + (toMin(b.end) - toMin(b.start)), 0);
+          const h = Math.floor(totalMins / 60);
+          const min = totalMins % 60;
+          const pct = Math.round((totalMins / 480) * 100);
+          return (
+            <div key={i} style={{ marginBottom: 10 }}>
+              <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 3 }}>
+                <span style={{ fontSize: 12, fontFamily: "'Noto Sans JP', sans-serif" }}>
+                  {m.icon} {m.name}
+                </span>
+                <span style={{ fontSize: 12, fontWeight: 700, color: m.color,
+                  fontFamily: "'Noto Sans JP', sans-serif" }}>
+                  {h}h{min > 0 ? `${min}m` : ""}
+                </span>
               </div>
-            );
-          })}
+              <div style={{ height: 7, background: T.grayL, borderRadius: 4, overflow: "hidden" }}>
+                <div style={{ width: `${Math.min(pct, 100)}%`, height: "100%",
+                  background: m.color, borderRadius: 4 }} />
+              </div>
+            </div>
+          );
+        })}
 
-          {/* 3人合計 */}
-          <div style={{ marginTop: 10, padding: "10px 14px",
-            background: `${T.indigo}11`, borderRadius: 10,
-            display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-            <span style={{ fontFamily: "'Noto Sans JP', sans-serif", fontSize: 13,
-              fontWeight: 700, color: T.indigo }}>3人合計</span>
-            <span style={{ fontFamily: "'Noto Sans JP', sans-serif", fontSize: 16,
-              fontWeight: 800, color: T.indigo }}>
-              0時間
-            </span>
-          </div>
-        </Card>
-      )}
+        {(() => {
+          const teamTotal = MEMBERS.reduce((a, m) => {
+            const mb = getWorkBlocks(m.name, todayStr);
+            return a + mb.reduce((s, b) => s + (toMin(b.end) - toMin(b.start)), 0);
+          }, 0);
+          const h = Math.floor(teamTotal / 60), min = teamTotal % 60;
+          return (
+            <div style={{ marginTop: 10, padding: "10px 14px",
+              background: `${T.indigo}11`, borderRadius: 10,
+              display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+              <span style={{ fontFamily: "'Noto Sans JP', sans-serif", fontSize: 13,
+                fontWeight: 700, color: T.indigo }}>{MEMBERS.length}人合計</span>
+              <span style={{ fontFamily: "'Noto Sans JP', sans-serif", fontSize: 16,
+                fontWeight: 800, color: T.indigo }}>
+                {h > 0 ? (min > 0 ? `${h}時間${min}分` : `${h}時間`) : `${min}分`}
+              </span>
+            </div>
+          );
+        })()}
+      </Card>
 
       {/* 集計タブ */}
       <Card>
@@ -1489,7 +1715,7 @@ export default function App() {
 
   const map = {
     home:    <HomeScreen posts={posts} markRead={markRead} onNav={setScreen} currentUser={currentUser} memberNames={MEMBER_NAMES} />,
-    clock:   <ClockScreen />,
+    clock:   <ClockScreen currentUser={currentUser} />,
     work:    <WorkScreen currentUser={currentUser} />,
     journal: <JournalScreen posts={posts} setPosts={setPosts} markRead={markRead} currentUser={currentUser} memberNames={MEMBER_NAMES} />,
     leave:   <LeaveScreen currentUser={currentUser} />,
