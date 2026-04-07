@@ -1385,53 +1385,79 @@ function JournalScreen({ posts, setPosts, markRead, currentUser, memberNames }) 
   const [commentText, setCommentText] = useState({});
   const [loading, setLoading] = useState(false);
 
-  // Supabaseから投稿を読み込む
+  // localStorage helpers for journal
+  const LS_JOURNAL_KEY = "journal_posts";
+  const loadLocalPosts = () => {
+    try { return JSON.parse(localStorage.getItem(LS_JOURNAL_KEY) || "[]"); } catch { return []; }
+  };
+  const saveLocalPosts = (arr) => { localStorage.setItem(LS_JOURNAL_KEY, JSON.stringify(arr)); };
+
+  // 投稿を読み込む（Supabase → localStorage fallback）
   useEffect(() => {
     const loadPosts = async () => {
-      if (!supabase) return;
-      const { data } = await supabase
-        .from('journal_posts')
-        .select('*')
-        .order('created_at', { ascending: false });
-      if (data && data.length > 0) {
-        const formatted = data.map(p => ({
-          id: p.id,
-          name: p.user_name,
-          time: new Date(p.created_at).toLocaleString('ja-JP', { month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit' }),
-          tag: p.tag,
-          color: TAG_COLORS[p.tag] || T.green,
-          content: p.content,
-          likes: p.likes || 0,
-          liked: false,
-          comments: p.comments || [],
-          showComments: false,
-          readBy: p.read_by || [],
-        }));
-        setPosts(formatted);
+      if (supabase) {
+        try {
+          const { data } = await supabase
+            .from('journal_posts')
+            .select('*')
+            .order('created_at', { ascending: false });
+          if (data && data.length > 0) {
+            const formatted = data.map(p => ({
+              id: p.id,
+              name: p.user_name,
+              time: new Date(p.created_at).toLocaleString('ja-JP', { month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit' }),
+              tag: p.tag,
+              color: TAG_COLORS[p.tag] || T.green,
+              content: p.content,
+              likes: p.likes || 0,
+              liked: false,
+              comments: p.comments || [],
+              showComments: false,
+              readBy: p.read_by || [],
+            }));
+            setPosts(formatted);
+            saveLocalPosts(formatted);
+            return;
+          }
+        } catch (e) { console.warn("Supabase load failed, using localStorage", e); }
       }
+      // fallback: localStorage
+      const local = loadLocalPosts();
+      if (local.length > 0) setPosts(local.map(p => ({ ...p, showComments: false, liked: false })));
     };
     loadPosts();
   }, []);
 
   const submitPost = async () => {
     if (!draft.content.trim()) return;
-    if (!supabase) return;
     setLoading(true);
     const col = TAG_COLORS[draft.tag];
-    const { data } = await supabase
-      .from('journal_posts')
-      .insert([{
-        user_name: ME, tag: draft.tag, content: draft.content,
-        likes: 0, read_by: [ME], comments: [],
-      }])
-      .select();
-    if (data && data[0]) {
-      setPosts(prev => [{
-        id: data[0].id, name: ME, time: "たった今", tag: draft.tag, color: col,
-        content: draft.content, likes: 0, liked: false, comments: [],
-        showComments: false, readBy: [ME],
-      }, ...prev]);
+    const now = new Date();
+    const timeStr = now.toLocaleString('ja-JP', { month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit' });
+    const newPost = {
+      id: Date.now().toString(),
+      name: ME, time: timeStr, tag: draft.tag, color: col,
+      content: draft.content, likes: 0, liked: false, comments: [],
+      showComments: false, readBy: [ME],
+    };
+
+    // Supabaseに保存を試行
+    if (supabase) {
+      try {
+        const { data } = await supabase
+          .from('journal_posts')
+          .insert([{
+            user_name: ME, tag: draft.tag, content: draft.content,
+            likes: 0, read_by: [ME], comments: [],
+          }])
+          .select();
+        if (data && data[0]) newPost.id = data[0].id;
+      } catch (e) { console.warn("Supabase save failed, using localStorage", e); }
     }
+
+    const updated = [newPost, ...posts];
+    setPosts(updated);
+    saveLocalPosts(updated);
     setDraft({ content: "", tag: "報告" });
     setShowForm(false);
     setLoading(false);
@@ -1441,17 +1467,22 @@ function JournalScreen({ posts, setPosts, markRead, currentUser, memberNames }) 
     const post = posts.find(p => p.id === id);
     if (!post) return;
     const newLikes = post.liked ? post.likes - 1 : post.likes + 1;
-    if (supabase) await supabase.from('journal_posts').update({ likes: newLikes }).eq('id', id);
-    setPosts(prev => prev.map(p => p.id === id ? { ...p, liked: !p.liked, likes: newLikes } : p));
+    if (supabase) { try { await supabase.from('journal_posts').update({ likes: newLikes }).eq('id', id); } catch {} }
+    const updated = posts.map(p => p.id === id ? { ...p, liked: !p.liked, likes: newLikes } : p);
+    setPosts(updated);
+    saveLocalPosts(updated);
   };
 
   const toggleComments = async (id) => {
-    setPosts(prev => prev.map(p => p.id === id ? { ...p, showComments: !p.showComments } : p));
+    const updated = posts.map(p => p.id === id ? { ...p, showComments: !p.showComments } : p);
+    setPosts(updated);
     const post = posts.find(p => p.id === id);
     if (post && !post.readBy.includes(ME)) {
       const newReadBy = [...post.readBy, ME];
-      if (supabase) await supabase.from('journal_posts').update({ read_by: newReadBy }).eq('id', id);
-      setPosts(prev => prev.map(p => p.id === id ? { ...p, readBy: newReadBy } : p));
+      if (supabase) { try { await supabase.from('journal_posts').update({ read_by: newReadBy }).eq('id', id); } catch {} }
+      const updated2 = updated.map(p => p.id === id ? { ...p, readBy: newReadBy } : p);
+      setPosts(updated2);
+      saveLocalPosts(updated2);
     }
   };
 
@@ -1461,9 +1492,18 @@ function JournalScreen({ posts, setPosts, markRead, currentUser, memberNames }) 
     const post = posts.find(p => p.id === id);
     if (!post) return;
     const newComments = [...post.comments, `${ME}: ${text}`];
-    if (supabase) await supabase.from('journal_posts').update({ comments: newComments }).eq('id', id);
-    setPosts(prev => prev.map(p => p.id === id ? { ...p, comments: newComments } : p));
+    if (supabase) { try { await supabase.from('journal_posts').update({ comments: newComments }).eq('id', id); } catch {} }
+    const updated = posts.map(p => p.id === id ? { ...p, comments: newComments } : p);
+    setPosts(updated);
+    saveLocalPosts(updated);
     setCommentText(prev => ({ ...prev, [id]: "" }));
+  };
+
+  const deletePost = async (id) => {
+    if (supabase) { try { await supabase.from('journal_posts').delete().eq('id', id); } catch {} }
+    const updated = posts.filter(p => p.id !== id);
+    setPosts(updated);
+    saveLocalPosts(updated);
   };
 
   return (
@@ -1591,6 +1631,15 @@ function JournalScreen({ posts, setPosts, markRead, currentUser, memberNames }) 
                 color: p.showComments ? T.skyL : T.gray,
                 zIndex: 10, position: "relative",
               }}>💬 {p.comments.length > 0 ? p.comments.length : ""}</button>
+
+              {p.name === ME && (
+                <button onClick={() => deletePost(p.id)} style={{
+                  background: "none", border: `1px solid ${T.grayL}`,
+                  borderRadius: 20, padding: "5px 10px", fontSize: 11, cursor: "pointer",
+                  fontFamily: "'Noto Sans JP', sans-serif", color: T.gray,
+                  zIndex: 10, position: "relative",
+                }}>🗑️</button>
+              )}
 
               <span style={{ fontSize: 11, color: T.gray, fontFamily: "'Noto Sans JP', sans-serif", marginLeft: "auto" }}>
                 既読 {p.readBy.length}/{MEMBERS.length}
