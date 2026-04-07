@@ -1836,6 +1836,388 @@ function LeaveScreen({ currentUser }) {
   );
 }
 
+// ── SCHEDULE ──
+const LS_SCHEDULE_KEY = "schedule_events";
+function loadSchedule() {
+  try { return JSON.parse(localStorage.getItem(LS_SCHEDULE_KEY) || "[]"); } catch { return []; }
+}
+function saveSchedule(events) { localStorage.setItem(LS_SCHEDULE_KEY, JSON.stringify(events)); }
+
+const SCHEDULE_COLORS = [
+  { label: "仕事", color: "#2D6A4F", bg: "#D8F3DC" },
+  { label: "会議", color: "#6366F1", bg: "#E0E7FF" },
+  { label: "配達", color: "#D97706", bg: "#FEF3C7" },
+  { label: "プライベート", color: "#7F5539", bg: "#F5ECD7" },
+  { label: "その他", color: "#6B7280", bg: "#F3F4F6" },
+];
+
+function ScheduleScreen({ currentUser }) {
+  const ME = currentUser?.name || "";
+  const todayStr = getTodayKey();
+  const [selectedDate, setSelectedDate] = useState(todayStr);
+  const [events, setEvents] = useState(() => loadSchedule());
+  const [showForm, setShowForm] = useState(false);
+  const [viewMode, setViewMode] = useState("month"); // "month" | "week" | "day"
+  const [editId, setEditId] = useState(null);
+  const [draft, setDraft] = useState({ title: "", date: todayStr, startTime: "09:00", endTime: "10:00", category: "仕事", member: ME, memo: "" });
+
+  const dayNames = ["日","月","火","水","木","金","土"];
+  const selD = new Date(selectedDate + "T00:00:00");
+  const selYear = selD.getFullYear(), selMonth = selD.getMonth();
+
+  // 月カレンダーデータ
+  const firstDay = new Date(selYear, selMonth, 1).getDay();
+  const lastDate = new Date(selYear, selMonth + 1, 0).getDate();
+  const calCells = [];
+  for (let i = 0; i < firstDay; i++) calCells.push(null);
+  for (let d = 1; d <= lastDate; d++) calCells.push(d);
+
+  const dateKey = (d) => `${selYear}-${String(selMonth+1).padStart(2,"0")}-${String(d).padStart(2,"0")}`;
+  const eventsOn = (dk) => events.filter(e => e.date === dk);
+
+  const goMonth = (delta) => {
+    const nd = new Date(selYear, selMonth + delta, 1);
+    setSelectedDate(`${nd.getFullYear()}-${String(nd.getMonth()+1).padStart(2,"0")}-01`);
+  };
+
+  const openAdd = (dateStr) => {
+    setDraft({ title: "", date: dateStr || selectedDate, startTime: "09:00", endTime: "10:00", category: "仕事", member: ME, memo: "" });
+    setEditId(null);
+    setShowForm(true);
+  };
+  const openEdit = (ev) => {
+    setDraft({ title: ev.title, date: ev.date, startTime: ev.startTime, endTime: ev.endTime, category: ev.category, member: ev.member, memo: ev.memo || "" });
+    setEditId(ev.id);
+    setShowForm(true);
+  };
+  const saveDraft = () => {
+    if (!draft.title.trim() || !draft.date) return;
+    let updated;
+    if (editId) {
+      updated = events.map(e => e.id === editId ? { ...e, ...draft } : e);
+    } else {
+      updated = [...events, { ...draft, id: Date.now().toString(), createdBy: ME }];
+    }
+    setEvents(updated);
+    saveSchedule(updated);
+    setShowForm(false);
+    setEditId(null);
+  };
+  const deleteEvent = (id) => {
+    const updated = events.filter(e => e.id !== id);
+    setEvents(updated);
+    saveSchedule(updated);
+  };
+
+  // 選択日のイベント
+  const dayEvents = eventsOn(selectedDate).sort((a, b) => a.startTime.localeCompare(b.startTime));
+  // 週のイベント
+  const weekDates = getWeekDates(selectedDate);
+
+  const catColor = (cat) => SCHEDULE_COLORS.find(c => c.label === cat) || SCHEDULE_COLORS[4];
+
+  return (
+    <div style={{ padding: "16px 14px 100px", display: "flex", flexDirection: "column", gap: 12 }}>
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+        <div style={{ fontWeight: 800, fontSize: 18, color: T.green, fontFamily: "'Noto Sans JP', sans-serif" }}>📅 スケジュール</div>
+        <button onClick={() => openAdd(selectedDate)} style={{
+          background: T.green, color: "white", border: "none", borderRadius: 20,
+          padding: "7px 16px", fontSize: 12, cursor: "pointer",
+          fontFamily: "'Noto Sans JP', sans-serif", fontWeight: 700,
+        }}>＋ 予定追加</button>
+      </div>
+
+      {/* 表示切替 */}
+      <div style={{ display: "flex", gap: 4 }}>
+        {[["month","月"],["week","週"],["day","日"]].map(([id, label]) => (
+          <button key={id} onClick={() => setViewMode(id)} style={{
+            flex: 1, background: viewMode === id ? T.green : T.grayL,
+            color: viewMode === id ? "white" : T.gray,
+            border: "none", borderRadius: 10, padding: "7px 2px",
+            fontSize: 11, fontWeight: 700, cursor: "pointer",
+            fontFamily: "'Noto Sans JP', sans-serif",
+          }}>{label}</button>
+        ))}
+      </div>
+
+      {/* 月表示 */}
+      {viewMode === "month" && (
+        <Card style={{ padding: "12px" }}>
+          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 10 }}>
+            <button onClick={() => goMonth(-1)} style={{ background: T.grayL, border: "none", borderRadius: 8, padding: "6px 12px", fontSize: 14, cursor: "pointer", color: T.gray, fontWeight: 700 }}>‹</button>
+            <div style={{ fontWeight: 800, fontSize: 15, color: T.green, fontFamily: "'Noto Sans JP', sans-serif" }}>
+              {selYear}年{selMonth+1}月
+            </div>
+            <button onClick={() => goMonth(1)} style={{ background: T.grayL, border: "none", borderRadius: 8, padding: "6px 12px", fontSize: 14, cursor: "pointer", color: T.gray, fontWeight: 700 }}>›</button>
+          </div>
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(7, 1fr)", gap: 2 }}>
+            {dayNames.map(d => (
+              <div key={d} style={{ textAlign: "center", fontSize: 10, fontWeight: 700,
+                color: d === "日" ? T.danger : d === "土" ? T.skyL : T.gray,
+                fontFamily: "'Noto Sans JP', sans-serif", padding: "4px 0" }}>{d}</div>
+            ))}
+            {calCells.map((day, i) => {
+              if (!day) return <div key={i} />;
+              const dk = dateKey(day);
+              const isToday = dk === todayStr;
+              const isSelected = dk === selectedDate;
+              const dayEv = eventsOn(dk);
+              return (
+                <div key={i} onClick={() => setSelectedDate(dk)} style={{
+                  textAlign: "center", padding: "4px 2px", cursor: "pointer",
+                  borderRadius: 8, minHeight: 36, position: "relative",
+                  background: isSelected ? T.green : isToday ? T.greenP : "transparent",
+                }}>
+                  <div style={{ fontSize: 12, fontWeight: isToday || isSelected ? 800 : 400,
+                    color: isSelected ? "white" : isToday ? T.green : i % 7 === 0 ? T.danger : i % 7 === 6 ? T.skyL : T.gray,
+                    fontFamily: "'Noto Sans JP', sans-serif" }}>{day}</div>
+                  {dayEv.length > 0 && (
+                    <div style={{ display: "flex", justifyContent: "center", gap: 2, marginTop: 2 }}>
+                      {dayEv.slice(0, 3).map((e, j) => (
+                        <div key={j} style={{ width: 5, height: 5, borderRadius: "50%",
+                          background: isSelected ? "white" : catColor(e.category).color }} />
+                      ))}
+                    </div>
+                  )}
+                </div>
+              );
+            })}
+          </div>
+        </Card>
+      )}
+
+      {/* 週表示 */}
+      {viewMode === "week" && (
+        <Card style={{ padding: "12px" }}>
+          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 10 }}>
+            <button onClick={() => { const d = new Date(selectedDate+"T00:00:00"); d.setDate(d.getDate()-7); setSelectedDate(`${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,"0")}-${String(d.getDate()).padStart(2,"0")}`); }}
+              style={{ background: T.grayL, border: "none", borderRadius: 8, padding: "6px 12px", fontSize: 14, cursor: "pointer", color: T.gray, fontWeight: 700 }}>‹</button>
+            <div style={{ fontWeight: 700, fontSize: 13, color: T.green, fontFamily: "'Noto Sans JP', sans-serif" }}>
+              {(() => { const s = weekDates[0], e = weekDates[6]; return `${s.slice(5).replace("-","/")} 〜 ${e.slice(5).replace("-","/")}`; })()}
+            </div>
+            <button onClick={() => { const d = new Date(selectedDate+"T00:00:00"); d.setDate(d.getDate()+7); setSelectedDate(`${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,"0")}-${String(d.getDate()).padStart(2,"0")}`); }}
+              style={{ background: T.grayL, border: "none", borderRadius: 8, padding: "6px 12px", fontSize: 14, cursor: "pointer", color: T.gray, fontWeight: 700 }}>›</button>
+          </div>
+          {weekDates.map((dk, i) => {
+            const d = new Date(dk + "T00:00:00");
+            const isToday = dk === todayStr;
+            const isSelected = dk === selectedDate;
+            const dayEv = eventsOn(dk);
+            return (
+              <div key={i} onClick={() => setSelectedDate(dk)} style={{
+                display: "flex", gap: 8, padding: "8px 6px", cursor: "pointer",
+                borderRadius: 10, marginBottom: 2,
+                background: isSelected ? T.greenP : "transparent",
+                borderLeft: isToday ? `3px solid ${T.green}` : "3px solid transparent",
+              }}>
+                <div style={{ width: 32, textAlign: "center", flexShrink: 0 }}>
+                  <div style={{ fontSize: 10, color: T.gray, fontFamily: "'Noto Sans JP', sans-serif" }}>{dayNames[d.getDay()]}</div>
+                  <div style={{ fontSize: 16, fontWeight: 800, color: isToday ? T.green : T.gray,
+                    fontFamily: "'Noto Sans JP', sans-serif" }}>{d.getDate()}</div>
+                </div>
+                <div style={{ flex: 1, minWidth: 0 }}>
+                  {dayEv.length === 0 && <div style={{ fontSize: 11, color: "#ccc", fontFamily: "'Noto Sans JP', sans-serif" }}>予定なし</div>}
+                  {dayEv.map((e, j) => {
+                    const cc = catColor(e.category);
+                    return (
+                      <div key={j} style={{ fontSize: 11, fontFamily: "'Noto Sans JP', sans-serif",
+                        display: "flex", alignItems: "center", gap: 6, padding: "2px 0" }}>
+                        <div style={{ width: 6, height: 6, borderRadius: 2, background: cc.color, flexShrink: 0 }} />
+                        <span style={{ color: cc.color, fontWeight: 700 }}>{e.startTime}</span>
+                        <span style={{ flex: 1, overflow: "hidden", whiteSpace: "nowrap", textOverflow: "ellipsis" }}>{e.title}</span>
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+            );
+          })}
+        </Card>
+      )}
+
+      {/* 日表示 / 選択日の予定 */}
+      <Card>
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 10 }}>
+          <div style={{ fontWeight: 700, fontSize: 13, color: T.green, fontFamily: "'Noto Sans JP', sans-serif" }}>
+            {(() => {
+              const d = new Date(selectedDate + "T00:00:00");
+              return `${d.getMonth()+1}/${d.getDate()}（${dayNames[d.getDay()]}）の予定`;
+            })()}
+          </div>
+          <button onClick={() => openAdd(selectedDate)} style={{
+            background: "none", border: `1px solid ${T.green}`, borderRadius: 16,
+            padding: "4px 10px", fontSize: 10, color: T.green, cursor: "pointer",
+            fontFamily: "'Noto Sans JP', sans-serif", fontWeight: 700,
+          }}>＋追加</button>
+        </div>
+        {dayEvents.length === 0 && (
+          <div style={{ textAlign: "center", padding: "20px 0", color: T.gray, fontSize: 12, fontFamily: "'Noto Sans JP', sans-serif" }}>
+            この日の予定はありません
+          </div>
+        )}
+        {dayEvents.map((ev, i) => {
+          const cc = catColor(ev.category);
+          return (
+            <div key={ev.id} style={{ display: "flex", gap: 10, padding: "10px 0",
+              borderBottom: i < dayEvents.length - 1 ? `1px solid ${T.grayL}` : "none" }}>
+              <div style={{ width: 4, borderRadius: 4, background: cc.color, flexShrink: 0 }} />
+              <div style={{ flex: 1, minWidth: 0 }}>
+                <div style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 3 }}>
+                  <span style={{ fontSize: 13, fontWeight: 800, fontFamily: "'Noto Sans JP', sans-serif", color: "#111" }}>{ev.title}</span>
+                  <span style={{ fontSize: 10, fontFamily: "'Noto Sans JP', sans-serif",
+                    background: cc.bg, color: cc.color, borderRadius: 10, padding: "1px 8px", fontWeight: 700 }}>{ev.category}</span>
+                </div>
+                <div style={{ fontSize: 12, color: T.gray, fontFamily: "monospace" }}>{ev.startTime} 〜 {ev.endTime}</div>
+                {ev.member && ev.member !== ME && (
+                  <div style={{ fontSize: 10, color: T.gray, fontFamily: "'Noto Sans JP', sans-serif", marginTop: 2 }}>👤 {ev.member}</div>
+                )}
+                {ev.memo && <div style={{ fontSize: 11, color: T.gray, fontFamily: "'Noto Sans JP', sans-serif", marginTop: 3 }}>{ev.memo}</div>}
+              </div>
+              <div style={{ display: "flex", flexDirection: "column", gap: 4, flexShrink: 0 }}>
+                <button onClick={() => openEdit(ev)} style={{
+                  background: "none", border: "none", cursor: "pointer", fontSize: 13, color: T.skyL, padding: "2px",
+                }}>✏️</button>
+                <button onClick={() => deleteEvent(ev.id)} style={{
+                  background: "none", border: "none", cursor: "pointer", fontSize: 13, color: "#ccc", padding: "2px",
+                }}>🗑️</button>
+              </div>
+            </div>
+          );
+        })}
+      </Card>
+
+      {/* チームの今日の予定 */}
+      <Card>
+        <div style={{ fontWeight: 700, fontSize: 13, color: T.indigo, fontFamily: "'Noto Sans JP', sans-serif", marginBottom: 10 }}>
+          👥 チームの予定（{(() => { const d = new Date(selectedDate+"T00:00:00"); return `${d.getMonth()+1}/${d.getDate()}`; })()}）
+        </div>
+        {MEMBERS.map((m, i) => {
+          const mEvents = eventsOn(selectedDate).filter(e => e.member === m.name);
+          return (
+            <div key={i} style={{ marginBottom: 8 }}>
+              <div style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 4 }}>
+                <span style={{ fontSize: 14 }}>{m.icon}</span>
+                <span style={{ fontSize: 12, fontWeight: 700, fontFamily: "'Noto Sans JP', sans-serif" }}>{m.name}</span>
+                <span style={{ fontSize: 10, color: T.gray, fontFamily: "'Noto Sans JP', sans-serif" }}>{mEvents.length}件</span>
+              </div>
+              {mEvents.map((e, j) => {
+                const cc = catColor(e.category);
+                return (
+                  <div key={j} style={{ display: "flex", alignItems: "center", gap: 6, padding: "3px 0 3px 20px" }}>
+                    <div style={{ width: 5, height: 5, borderRadius: 2, background: cc.color, flexShrink: 0 }} />
+                    <span style={{ fontSize: 11, color: cc.color, fontWeight: 700, fontFamily: "monospace" }}>{e.startTime}</span>
+                    <span style={{ fontSize: 11, fontFamily: "'Noto Sans JP', sans-serif",
+                      overflow: "hidden", whiteSpace: "nowrap", textOverflow: "ellipsis" }}>{e.title}</span>
+                  </div>
+                );
+              })}
+              {mEvents.length === 0 && (
+                <div style={{ fontSize: 10, color: "#ccc", fontFamily: "'Noto Sans JP', sans-serif", paddingLeft: 20 }}>予定なし</div>
+              )}
+            </div>
+          );
+        })}
+      </Card>
+
+      {/* 予定登録/編集フォーム */}
+      {showForm && (
+        <div style={{ position: "fixed", top: 0, left: 0, right: 0, bottom: 0, background: "rgba(0,0,0,0.5)",
+          zIndex: 2000, display: "flex", alignItems: "center", justifyContent: "center", padding: 16 }}
+          onClick={(e) => { if (e.target === e.currentTarget) { setShowForm(false); setEditId(null); } }}>
+          <div style={{ background: "white", borderRadius: 20, padding: "20px 16px", width: "100%", maxWidth: 400,
+            maxHeight: "85vh", overflowY: "auto" }}>
+            <div style={{ fontWeight: 800, fontSize: 16, color: T.green, fontFamily: "'Noto Sans JP', sans-serif", marginBottom: 14 }}>
+              {editId ? "✏️ 予定を編集" : "📅 予定を追加"}
+            </div>
+
+            <div style={{ marginBottom: 10 }}>
+              <div style={{ fontSize: 10, fontWeight: 700, color: T.gray, fontFamily: "'Noto Sans JP', sans-serif", marginBottom: 4 }}>タイトル</div>
+              <input value={draft.title} onChange={e => setDraft(d => ({ ...d, title: e.target.value }))}
+                placeholder="例：圃場視察、配達、会議..."
+                style={{ width: "100%", borderRadius: 10, border: `1.5px solid ${T.grayL}`, padding: "9px 12px",
+                  fontSize: 13, fontFamily: "'Noto Sans JP', sans-serif", outline: "none", boxSizing: "border-box" }} />
+            </div>
+
+            <div style={{ marginBottom: 10 }}>
+              <div style={{ fontSize: 10, fontWeight: 700, color: T.gray, fontFamily: "'Noto Sans JP', sans-serif", marginBottom: 4 }}>日付</div>
+              <input type="date" value={draft.date} onChange={e => setDraft(d => ({ ...d, date: e.target.value }))}
+                style={{ width: "100%", borderRadius: 10, border: `1.5px solid ${T.grayL}`, padding: "9px 12px",
+                  fontSize: 13, fontFamily: "'Noto Sans JP', sans-serif", outline: "none", boxSizing: "border-box" }} />
+            </div>
+
+            <div style={{ display: "flex", gap: 8, marginBottom: 10 }}>
+              <div style={{ flex: 1 }}>
+                <div style={{ fontSize: 10, fontWeight: 700, color: T.gray, fontFamily: "'Noto Sans JP', sans-serif", marginBottom: 4 }}>開始</div>
+                <input type="time" value={draft.startTime} onChange={e => setDraft(d => ({ ...d, startTime: e.target.value }))}
+                  style={{ width: "100%", borderRadius: 10, border: `1.5px solid ${T.grayL}`, padding: "9px 12px",
+                    fontSize: 13, fontFamily: "monospace", outline: "none", boxSizing: "border-box" }} />
+              </div>
+              <div style={{ flex: 1 }}>
+                <div style={{ fontSize: 10, fontWeight: 700, color: T.gray, fontFamily: "'Noto Sans JP', sans-serif", marginBottom: 4 }}>終了</div>
+                <input type="time" value={draft.endTime} onChange={e => setDraft(d => ({ ...d, endTime: e.target.value }))}
+                  style={{ width: "100%", borderRadius: 10, border: `1.5px solid ${T.grayL}`, padding: "9px 12px",
+                    fontSize: 13, fontFamily: "monospace", outline: "none", boxSizing: "border-box" }} />
+              </div>
+            </div>
+
+            <div style={{ marginBottom: 10 }}>
+              <div style={{ fontSize: 10, fontWeight: 700, color: T.gray, fontFamily: "'Noto Sans JP', sans-serif", marginBottom: 4 }}>カテゴリ</div>
+              <div style={{ display: "flex", flexWrap: "wrap", gap: 5 }}>
+                {SCHEDULE_COLORS.map(sc => (
+                  <button key={sc.label} onClick={() => setDraft(d => ({ ...d, category: sc.label }))} style={{
+                    background: draft.category === sc.label ? sc.color : T.grayL,
+                    color: draft.category === sc.label ? "white" : "#333",
+                    border: "none", borderRadius: 16, padding: "6px 12px", fontSize: 11,
+                    fontWeight: 700, cursor: "pointer", fontFamily: "'Noto Sans JP', sans-serif",
+                  }}>{sc.label}</button>
+                ))}
+              </div>
+            </div>
+
+            <div style={{ marginBottom: 10 }}>
+              <div style={{ fontSize: 10, fontWeight: 700, color: T.gray, fontFamily: "'Noto Sans JP', sans-serif", marginBottom: 4 }}>担当者</div>
+              <div style={{ display: "flex", flexWrap: "wrap", gap: 5 }}>
+                {MEMBERS.map(m => (
+                  <button key={m.name} onClick={() => setDraft(d => ({ ...d, member: m.name }))} style={{
+                    background: draft.member === m.name ? m.color : T.grayL,
+                    color: draft.member === m.name ? "white" : "#333",
+                    border: "none", borderRadius: 16, padding: "6px 12px", fontSize: 11,
+                    fontWeight: 700, cursor: "pointer", fontFamily: "'Noto Sans JP', sans-serif",
+                  }}>{m.icon} {m.name.split(" ")[0]}</button>
+                ))}
+              </div>
+            </div>
+
+            <div style={{ marginBottom: 14 }}>
+              <div style={{ fontSize: 10, fontWeight: 700, color: T.gray, fontFamily: "'Noto Sans JP', sans-serif", marginBottom: 4 }}>メモ</div>
+              <textarea value={draft.memo} onChange={e => setDraft(d => ({ ...d, memo: e.target.value }))}
+                placeholder="詳細メモ（任意）"
+                style={{ width: "100%", minHeight: 60, borderRadius: 10, border: `1.5px solid ${T.grayL}`,
+                  padding: "9px 12px", fontSize: 12, fontFamily: "'Noto Sans JP', sans-serif",
+                  resize: "vertical", outline: "none", boxSizing: "border-box" }} />
+            </div>
+
+            <div style={{ display: "flex", gap: 8 }}>
+              <button onClick={saveDraft} disabled={!draft.title.trim()} style={{
+                flex: 2, background: draft.title.trim() ? `linear-gradient(135deg,${T.green},${T.greenL})` : T.grayL,
+                color: draft.title.trim() ? "white" : T.gray,
+                border: "none", borderRadius: 12, padding: "12px", fontWeight: 800, fontSize: 14,
+                cursor: draft.title.trim() ? "pointer" : "default",
+                fontFamily: "'Noto Sans JP', sans-serif",
+              }}>{editId ? "保存する" : "追加する"}</button>
+              <button onClick={() => { setShowForm(false); setEditId(null); }} style={{
+                flex: 1, background: T.grayL, color: T.gray,
+                border: "none", borderRadius: 12, padding: "12px", fontWeight: 700, fontSize: 13,
+                cursor: "pointer", fontFamily: "'Noto Sans JP', sans-serif",
+              }}>閉じる</button>
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
 // ── MEMBERS ──
 const MEMBERS = [
   { name: "栗原 優介", icon: "👨‍🌾", color: T.green },
@@ -1930,6 +2312,7 @@ export default function App() {
     clock:   <ClockScreen currentUser={currentUser} />,
     work:    <WorkScreen currentUser={currentUser} />,
     journal: <JournalScreen posts={posts} setPosts={setPosts} markRead={markRead} currentUser={currentUser} memberNames={MEMBER_NAMES} />,
+    schedule: <ScheduleScreen currentUser={currentUser} />,
     leave:   <LeaveScreen currentUser={currentUser} />,
   };
 
@@ -1977,8 +2360,9 @@ export default function App() {
           { id: "home",    icon: "🏠", label: "ホーム" },
           { id: "clock",   icon: "⏱",  label: "出退勤" },
           { id: "work",    icon: "🌾", label: "作業記録" },
+          { id: "schedule",icon: "📅", label: "予定" },
           { id: "journal", icon: "📋", label: "日誌", badge: unreadImportant },
-          { id: "leave",   icon: "📅", label: "有給" },
+          { id: "leave",   icon: "🏖️", label: "有給" },
         ].map(it => (
           <button key={it.id} onClick={() => setScreen(it.id)} style={{
             display: "flex", flexDirection: "column", alignItems: "center",
