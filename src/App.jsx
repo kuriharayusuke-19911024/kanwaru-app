@@ -297,8 +297,9 @@ function ClockScreen({ currentUser }) {
   const todayKey = getTodayKey();
   const [clockState, setClockState] = useState(() => getClockData(ME, todayKey));
   const [, setTick] = useState(0);
+  const [editing, setEditing] = useState(null); // "in" | "out" | null
+  const [editVal, setEditVal] = useState("");
 
-  // 1分ごとに再レンダリングして経過時間を更新
   useEffect(() => {
     const iv = setInterval(() => setTick(t => t + 1), 60000);
     return () => clearInterval(iv);
@@ -318,7 +319,22 @@ function ClockScreen({ currentUser }) {
     }
   };
 
-  // 勤務時間計算
+  const startEdit = (field) => {
+    setEditing(field);
+    setEditVal(field === "in" ? (clockState?.clockIn || "") : (clockState?.clockOut || ""));
+  };
+  const saveEdit = () => {
+    if (!editVal || !editing) { setEditing(null); return; }
+    const data = { ...clockState, [editing === "in" ? "clockIn" : "clockOut"]: editVal };
+    setClockData(ME, todayKey, data);
+    setClockState(data);
+    setEditing(null);
+  };
+  const resetClock = () => {
+    localStorage.removeItem(`clock_${todayKey}_${ME}`);
+    setClockState(null);
+  };
+
   const workDuration = () => {
     if (!clockState?.clockIn) return "";
     const end = clockState.clockOut || nowHHMM();
@@ -328,7 +344,6 @@ function ClockScreen({ currentUser }) {
     return h > 0 ? (m > 0 ? `${h}時間${m}分` : `${h}時間`) : `${m}分`;
   };
 
-  // 今週の履歴
   const weekDates = getWeekDates(todayKey);
   const dayNames = ["日","月","火","水","木","金","土"];
   const weekHistory = weekDates.map(dateKey => {
@@ -346,6 +361,12 @@ function ClockScreen({ currentUser }) {
     return { day: dayName, dateKey, in: inT, out: outT || "進行中", hours };
   }).filter(r => r.in);
 
+  const timeInputStyle = {
+    fontFamily: "monospace", fontSize: 18, fontWeight: 700,
+    border: `2px solid ${T.green}`, borderRadius: 10, padding: "6px 10px",
+    textAlign: "center", width: 100, outline: "none",
+  };
+
   return (
     <div style={{ padding: "16px 14px 100px", display: "flex", flexDirection: "column", gap: 12 }}>
       <div style={{ fontWeight: 800, fontSize: 18, color: T.green, fontFamily: "'Noto Sans JP', sans-serif" }}>⏱ 出退勤</div>
@@ -357,13 +378,44 @@ function ClockScreen({ currentUser }) {
           fontFamily: "'Noto Sans JP', sans-serif" }}>
           {status === "working" ? "🟢 勤務中" : status === "done" ? "⚫ 退勤済み" : "⬜ 未出勤"}
         </div>
+
+        {/* 出退勤時刻（タップで編集可能） */}
         {clockState?.clockIn && (
-          <div style={{ fontSize: 28, fontWeight: 800, letterSpacing: 2, margin: "10px 0", fontFamily: "monospace" }}>
-            {clockState.clockIn} 〜 {clockState.clockOut ? (
-              <span style={{ color: T.gray }}>{clockState.clockOut}</span>
+          <div style={{ margin: "10px 0", display: "flex", alignItems: "center", justifyContent: "center", gap: 6 }}>
+            {editing === "in" ? (
+              <div style={{ display: "flex", alignItems: "center", gap: 4 }}>
+                <input type="time" value={editVal} onChange={e => setEditVal(e.target.value)} style={timeInputStyle} />
+                <button onClick={saveEdit} style={{ background: T.green, color: "white", border: "none",
+                  borderRadius: 8, padding: "6px 10px", fontSize: 12, fontWeight: 700, cursor: "pointer" }}>OK</button>
+              </div>
             ) : (
-              <span style={{ color: T.green }}>進行中</span>
+              <span onClick={() => startEdit("in")} style={{
+                fontSize: 28, fontWeight: 800, fontFamily: "monospace", cursor: "pointer",
+                borderBottom: `2px dashed ${T.green}44`, padding: "0 2px",
+              }}>{clockState.clockIn}</span>
             )}
+            <span style={{ fontSize: 24, color: T.gray }}>〜</span>
+            {clockState.clockOut ? (
+              editing === "out" ? (
+                <div style={{ display: "flex", alignItems: "center", gap: 4 }}>
+                  <input type="time" value={editVal} onChange={e => setEditVal(e.target.value)} style={timeInputStyle} />
+                  <button onClick={saveEdit} style={{ background: T.green, color: "white", border: "none",
+                    borderRadius: 8, padding: "6px 10px", fontSize: 12, fontWeight: 700, cursor: "pointer" }}>OK</button>
+                </div>
+              ) : (
+                <span onClick={() => startEdit("out")} style={{
+                  fontSize: 28, fontWeight: 800, fontFamily: "monospace", color: T.gray, cursor: "pointer",
+                  borderBottom: `2px dashed ${T.gray}44`, padding: "0 2px",
+                }}>{clockState.clockOut}</span>
+              )
+            ) : (
+              <span style={{ fontSize: 28, fontWeight: 800, fontFamily: "monospace", color: T.green }}>進行中</span>
+            )}
+          </div>
+        )}
+        {clockState?.clockIn && !editing && (
+          <div style={{ fontSize: 10, color: T.gray, fontFamily: "'Noto Sans JP', sans-serif", marginBottom: 4 }}>
+            時刻をタップして修正できます
           </div>
         )}
         {clockState?.clockIn && (
@@ -387,6 +439,14 @@ function ClockScreen({ currentUser }) {
             fontSize: 12, color: T.green, fontWeight: 700, fontFamily: "'Noto Sans JP', sans-serif" }}>
             本日の勤務は完了しました
           </div>
+        )}
+        {/* リセットボタン */}
+        {clockState?.clockIn && (
+          <button onClick={resetClock} style={{
+            marginTop: 10, background: "none", border: `1px solid ${T.grayL}`,
+            borderRadius: 8, padding: "6px 14px", fontSize: 11, color: T.gray,
+            cursor: "pointer", fontFamily: "'Noto Sans JP', sans-serif",
+          }}>打刻をリセット</button>
         )}
       </Card>
 
@@ -500,6 +560,8 @@ function WorkScreen({ currentUser }) {
     return saved.length > 0 && saved.every(b => b.locked);
   });
   const [draft, setDraft]    = useState({ bizId: null, task: null, meetWith: null, endTime: null });
+  const [editIdx, setEditIdx] = useState(null); // 編集中のブロックindex
+  const [editDraft, setEditDraft] = useState(null); // 編集中のブロック内容
 
   const nextStart = blocks.length > 0 ? blocks[blocks.length - 1].end : CLOCKIN;
   const bizOf     = id => BIZ.find(b => b.id === id);
@@ -533,6 +595,21 @@ function WorkScreen({ currentUser }) {
     setBlocks(updated);
     saveWorkBlocks(ME, selectedDate, updated);
   };
+
+  const startEditBlock = (idx) => {
+    if (dayLocked) return;
+    setEditIdx(idx);
+    setEditDraft({ ...blocks[idx] });
+  };
+  const saveEditBlock = () => {
+    if (editIdx === null || !editDraft) return;
+    const updated = blocks.map((b, i) => i === editIdx ? editDraft : b);
+    setBlocks(updated);
+    saveWorkBlocks(ME, selectedDate, updated);
+    setEditIdx(null);
+    setEditDraft(null);
+  };
+  const cancelEditBlock = () => { setEditIdx(null); setEditDraft(null); };
 
   const confirmDay = () => {
     if (blocks.length === 0) return;
@@ -969,9 +1046,19 @@ function WorkScreen({ currentUser }) {
                 marginBottom: 10, display: "flex", alignItems: "center", gap: 8 }}>
                 <span style={{ fontSize: 16 }}>🔒</span>
                 <span style={{ fontSize: 12, fontWeight: 700, color: T.green,
-                  fontFamily: "'Noto Sans JP', sans-serif" }}>
-                  本日の記録は確定済みです
+                  fontFamily: "'Noto Sans JP', sans-serif", flex: 1 }}>
+                  記録は確定済みです
                 </span>
+                <button onClick={() => {
+                  const unlocked = blocks.map(b => ({ ...b, locked: false }));
+                  setBlocks(unlocked);
+                  saveWorkBlocks(ME, selectedDate, unlocked);
+                  setDayLocked(false);
+                }} style={{
+                  background: "none", border: `1px solid ${T.green}`, borderRadius: 8,
+                  padding: "4px 10px", fontSize: 10, color: T.green, cursor: "pointer",
+                  fontFamily: "'Noto Sans JP', sans-serif", fontWeight: 700,
+                }}>解除して編集</button>
               </div>
             ) : (
               <div style={{ background: "#FEF9C3", borderRadius: 10, padding: "8px 12px",
@@ -987,6 +1074,76 @@ function WorkScreen({ currentUser }) {
             {blocks.map((bl, i) => {
               const b = bizOf(bl.bizId);
               const col = b?.color || T.green;
+
+              // 編集モード
+              if (editIdx === i && editDraft) {
+                const edBiz = bizOf(editDraft.bizId);
+                const edMeeting = edBiz?.meetingMode && editDraft.task === "会議・打ち合わせ";
+                return (
+                  <div key={i} style={{ padding: "10px 0", borderBottom: i < blocks.length - 1 ? `1px solid ${T.grayL}` : "none" }}>
+                    <div style={{ fontSize: 10, fontWeight: 700, color: T.gray, fontFamily: "'Noto Sans JP', sans-serif", marginBottom: 6 }}>事業</div>
+                    <div style={{ display: "flex", flexWrap: "wrap", gap: 4, marginBottom: 8 }}>
+                      {BIZ.map(bz => (
+                        <button key={bz.id} onClick={() => setEditDraft(d => ({ ...d, bizId: bz.id, task: null, meetWith: null }))} style={{
+                          background: editDraft.bizId === bz.id ? bz.color : T.grayL,
+                          color: editDraft.bizId === bz.id ? "white" : "#333",
+                          border: "none", borderRadius: 10, padding: "5px 10px", fontSize: 10,
+                          fontWeight: 700, cursor: "pointer", fontFamily: "'Noto Sans JP', sans-serif",
+                        }}>{bz.icon} {bz.label}</button>
+                      ))}
+                    </div>
+                    {edBiz && (
+                      <>
+                        <div style={{ fontSize: 10, fontWeight: 700, color: T.gray, fontFamily: "'Noto Sans JP', sans-serif", marginBottom: 6 }}>作業内容</div>
+                        <div style={{ display: "flex", flexWrap: "wrap", gap: 4, marginBottom: 8 }}>
+                          {edBiz.tasks.map(t => (
+                            <button key={t} onClick={() => setEditDraft(d => ({ ...d, task: t, meetWith: null }))} style={{
+                              background: editDraft.task === t ? edBiz.color : T.grayL,
+                              color: editDraft.task === t ? "white" : "#333",
+                              border: "none", borderRadius: 16, padding: "5px 10px", fontSize: 10,
+                              fontWeight: 700, cursor: "pointer", fontFamily: "'Noto Sans JP', sans-serif",
+                            }}>{t}</button>
+                          ))}
+                        </div>
+                      </>
+                    )}
+                    {edMeeting && (
+                      <>
+                        <div style={{ fontSize: 10, fontWeight: 700, color: T.gray, fontFamily: "'Noto Sans JP', sans-serif", marginBottom: 6 }}>会議の相手</div>
+                        <div style={{ display: "flex", flexWrap: "wrap", gap: 4, marginBottom: 8 }}>
+                          {MEETING_PARTNERS.map(p => (
+                            <button key={p} onClick={() => setEditDraft(d => ({ ...d, meetWith: p }))} style={{
+                              background: editDraft.meetWith === p ? T.indigo : T.grayL,
+                              color: editDraft.meetWith === p ? "white" : "#333",
+                              border: "none", borderRadius: 16, padding: "5px 10px", fontSize: 10,
+                              fontWeight: 700, cursor: "pointer", fontFamily: "'Noto Sans JP', sans-serif",
+                            }}>{p}</button>
+                          ))}
+                        </div>
+                      </>
+                    )}
+                    <div style={{ fontSize: 10, fontWeight: 700, color: T.gray, fontFamily: "'Noto Sans JP', sans-serif", marginBottom: 6 }}>時間</div>
+                    <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 10 }}>
+                      <input type="time" value={editDraft.start} onChange={e => setEditDraft(d => ({ ...d, start: e.target.value }))}
+                        style={{ fontFamily: "monospace", fontSize: 14, border: `1.5px solid ${T.grayL}`, borderRadius: 8, padding: "6px 8px", width: 100 }} />
+                      <span style={{ color: T.gray }}>〜</span>
+                      <input type="time" value={editDraft.end} onChange={e => setEditDraft(d => ({ ...d, end: e.target.value }))}
+                        style={{ fontFamily: "monospace", fontSize: 14, border: `1.5px solid ${T.grayL}`, borderRadius: 8, padding: "6px 8px", width: 100 }} />
+                    </div>
+                    <div style={{ display: "flex", gap: 6 }}>
+                      <button onClick={saveEditBlock} style={{
+                        flex: 1, background: T.green, color: "white", border: "none", borderRadius: 10,
+                        padding: "8px", fontSize: 12, fontWeight: 700, cursor: "pointer", fontFamily: "'Noto Sans JP', sans-serif",
+                      }}>保存</button>
+                      <button onClick={cancelEditBlock} style={{
+                        flex: 1, background: T.grayL, color: T.gray, border: "none", borderRadius: 10,
+                        padding: "8px", fontSize: 12, fontWeight: 700, cursor: "pointer", fontFamily: "'Noto Sans JP', sans-serif",
+                      }}>キャンセル</button>
+                    </div>
+                  </div>
+                );
+              }
+
               return (
                 <div key={i} style={{ display: "flex", alignItems: "center", gap: 8,
                   padding: "7px 0", borderBottom: i < blocks.length - 1 ? `1px solid ${T.grayL}` : "none" }}>
@@ -1000,12 +1157,17 @@ function WorkScreen({ currentUser }) {
                     fontFamily: "'Noto Sans JP', sans-serif" }}>
                     {durationLabel(bl.start, bl.end)}
                   </div>
-                  {/* 削除ボタン（確定前のみ） */}
                   {!dayLocked && (
-                    <button onClick={() => deleteBlock(i)} style={{
-                      background: "none", border: "none", cursor: "pointer",
-                      fontSize: 14, color: "#ccc", padding: "2px 4px",
-                    }} title="削除">✕</button>
+                    <>
+                      <button onClick={() => startEditBlock(i)} style={{
+                        background: "none", border: "none", cursor: "pointer",
+                        fontSize: 13, color: T.skyL, padding: "2px 4px",
+                      }} title="編集">✏️</button>
+                      <button onClick={() => deleteBlock(i)} style={{
+                        background: "none", border: "none", cursor: "pointer",
+                        fontSize: 14, color: "#ccc", padding: "2px 4px",
+                      }} title="削除">✕</button>
+                    </>
                   )}
                 </div>
               );
