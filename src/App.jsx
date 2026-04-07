@@ -1,6 +1,28 @@
 import { useState, useEffect } from "react";
 import { supabase } from './supabase.js';
 
+// ── GAS Backend API ──
+// GASデプロイ後にここにURLを設定してください
+const GAS_URL = localStorage.getItem("kanwaru_gas_url") || "";
+
+async function gasGet(action) {
+  if (!GAS_URL) return null;
+  try {
+    const res = await fetch(GAS_URL + "?action=" + action);
+    const json = await res.json();
+    return json.result === "ok" ? json.data : null;
+  } catch (e) { console.warn("GAS GET error:", e); return null; }
+}
+async function gasPost(action, data, id) {
+  if (!GAS_URL) return false;
+  try {
+    const body = { action, data };
+    if (id) body.id = id;
+    await fetch(GAS_URL, { method: "POST", body: JSON.stringify(body) });
+    return true;
+  } catch (e) { console.warn("GAS POST error:", e); return false; }
+}
+
 const T = {
   green: "#2D6A4F", greenL: "#40916C", greenP: "#D8F3DC",
   earth: "#7F5539", earthL: "#B08968", earthP: "#F5ECD7",
@@ -1857,6 +1879,23 @@ function ScheduleScreen({ currentUser }) {
   const [selectedDate, setSelectedDate] = useState(todayStr);
   const [events, setEvents] = useState(() => loadSchedule());
   const [showForm, setShowForm] = useState(false);
+  const [gasUrl, setGasUrl] = useState(GAS_URL);
+  const [showSettings, setShowSettings] = useState(false);
+
+  // GASからデータを読み込み
+  useEffect(() => {
+    (async () => {
+      const remote = await gasGet("getSchedule");
+      if (remote && remote.length > 0) {
+        // リモートとローカルをマージ（IDで重複排除）
+        const local = loadSchedule();
+        const merged = [...remote];
+        local.forEach(l => { if (!merged.find(r => r.id === l.id)) merged.push(l); });
+        setEvents(merged);
+        saveSchedule(merged);
+      }
+    })();
+  }, []);
   const [viewMode, setViewMode] = useState("month"); // "month" | "week" | "day"
   const [editId, setEditId] = useState(null);
   const [draft, setDraft] = useState({ title: "", date: todayStr, startTime: "09:00", endTime: "10:00", category: "仕事", member: ME, memo: "" });
@@ -1890,13 +1929,18 @@ function ScheduleScreen({ currentUser }) {
     setEditId(ev.id);
     setShowForm(true);
   };
-  const saveDraft = () => {
+  const saveDraft = async () => {
     if (!draft.title.trim() || !draft.date) return;
     let updated;
+    const now = new Date().toISOString();
     if (editId) {
-      updated = events.map(e => e.id === editId ? { ...e, ...draft } : e);
+      const newData = { ...draft, updatedAt: now };
+      updated = events.map(e => e.id === editId ? { ...e, ...newData } : e);
+      gasPost("saveSchedule", { ...newData, id: editId, createdBy: ME });
     } else {
-      updated = [...events, { ...draft, id: Date.now().toString(), createdBy: ME }];
+      const newEvent = { ...draft, id: Date.now().toString(), createdBy: ME, updatedAt: now };
+      updated = [...events, newEvent];
+      gasPost("saveSchedule", newEvent);
     }
     setEvents(updated);
     saveSchedule(updated);
@@ -1907,6 +1951,7 @@ function ScheduleScreen({ currentUser }) {
     const updated = events.filter(e => e.id !== id);
     setEvents(updated);
     saveSchedule(updated);
+    gasPost("deleteSchedule", null, id);
   };
 
   // 選択日のイベント
@@ -2214,6 +2259,48 @@ function ScheduleScreen({ currentUser }) {
           </div>
         </div>
       )}
+
+      {/* GAS設定パネル */}
+      <Card style={{ borderTop: `3px solid ${T.grayL}` }}>
+        <button onClick={() => setShowSettings(!showSettings)} style={{
+          background: "none", border: "none", cursor: "pointer", width: "100%",
+          display: "flex", alignItems: "center", justifyContent: "space-between",
+          fontFamily: "'Noto Sans JP', sans-serif", fontSize: 12, color: T.gray,
+        }}>
+          <span>⚙️ データ共有設定</span>
+          <span>{showSettings ? "▲" : "▼"}</span>
+        </button>
+        {showSettings && (
+          <div style={{ marginTop: 10 }}>
+            <div style={{ fontSize: 10, color: T.gray, fontFamily: "'Noto Sans JP', sans-serif", marginBottom: 6, lineHeight: 1.6 }}>
+              チーム間でデータを共有するには、GASバックエンドのURLを設定してください。
+            </div>
+            <div style={{ display: "flex", alignItems: "center", gap: 6,
+              padding: "6px 10px", borderRadius: 8, marginBottom: 8,
+              background: gasUrl ? T.greenP : "#FEF3C7",
+            }}>
+              <span style={{ fontSize: 14 }}>{gasUrl ? "🟢" : "🟡"}</span>
+              <span style={{ fontSize: 11, fontFamily: "'Noto Sans JP', sans-serif", fontWeight: 700,
+                color: gasUrl ? T.green : T.warn }}>
+                {gasUrl ? "接続済み" : "未接続（ローカル保存のみ）"}
+              </span>
+            </div>
+            <input value={gasUrl} onChange={e => setGasUrl(e.target.value)}
+              placeholder="GASのデプロイURL（https://script.google.com/...）"
+              style={{ width: "100%", borderRadius: 8, border: `1.5px solid ${T.grayL}`, padding: "8px 10px",
+                fontSize: 11, fontFamily: "'Noto Sans JP', sans-serif", outline: "none", boxSizing: "border-box",
+                marginBottom: 6 }} />
+            <button onClick={() => {
+              localStorage.setItem("kanwaru_gas_url", gasUrl);
+              window.location.reload();
+            }} style={{
+              width: "100%", background: T.green, color: "white", border: "none", borderRadius: 8,
+              padding: "8px", fontSize: 12, fontWeight: 700, cursor: "pointer",
+              fontFamily: "'Noto Sans JP', sans-serif",
+            }}>保存してリロード</button>
+          </div>
+        )}
+      </Card>
     </div>
   );
 }
