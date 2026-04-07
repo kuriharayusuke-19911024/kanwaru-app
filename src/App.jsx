@@ -274,7 +274,7 @@ function HomeScreen({ posts, markRead, onNav, currentUser, memberNames }) {
           <div key={p.id} style={{ display: "flex", gap: 10, alignItems: "flex-start",
             padding: "8px 0", borderBottom: i < recentPosts.length - 1 ? `1px solid ${T.grayL}` : "none" }}>
             <div style={{ width: 6, height: 6, borderRadius: "50%", background: p.color, flexShrink: 0, marginTop: 5 }} />
-            <div style={{ flex: 1 }}>
+            <div style={{ flex: 1, minWidth: 0, overflow: "hidden" }}>
               <div style={{ display: "flex", gap: 6, alignItems: "center", marginBottom: 2 }}>
                 <Tag label={p.tag} color={p.color} bg={`${p.color}18`} />
                 <span style={{ fontSize: 10, color: T.gray, fontFamily: "'Noto Sans JP', sans-serif" }}>{p.name} · {p.time}</span>
@@ -1589,7 +1589,8 @@ function JournalScreen({ posts, setPosts, markRead, currentUser, memberNames }) 
               <Tag label={p.tag} color={p.color} bg={`${p.color}18`} />
             </div>
 
-            <div style={{ fontSize: 13, lineHeight: 1.6, fontFamily: "'Noto Sans JP', sans-serif", color: "#374151" }}>
+            <div style={{ fontSize: 13, lineHeight: 1.6, fontFamily: "'Noto Sans JP', sans-serif", color: "#374151",
+              wordBreak: "break-word", whiteSpace: "pre-wrap" }}>
               {p.content}
             </div>
 
