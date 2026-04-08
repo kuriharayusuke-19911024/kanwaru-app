@@ -3,7 +3,7 @@ import { supabase } from './supabase.js';
 
 // ── GAS Backend API ──
 // GASデプロイ後にここにURLを設定してください
-const GAS_URL = localStorage.getItem("kanwaru_gas_url") || "";
+const GAS_URL = localStorage.getItem("kanwaru_gas_url") || "https://script.google.com/macros/s/AKfycbw2zbXdPQbdJBmvwF4npPdlUVi7PpeQmKWWjlqLeJLPRIdgYWbP6YlULX15mW-aLZDN/exec";
 
 async function gasGet(action) {
   if (!GAS_URL) return null;
