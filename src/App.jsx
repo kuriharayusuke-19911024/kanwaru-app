@@ -319,8 +319,24 @@ function ClockScreen({ currentUser }) {
   const todayKey = getTodayKey();
   const [clockState, setClockState] = useState(() => getClockData(ME, todayKey));
   const [, setTick] = useState(0);
-  const [editing, setEditing] = useState(null); // "in" | "out" | null
+  const [editing, setEditing] = useState(null);
   const [editVal, setEditVal] = useState("");
+
+  // GASから全員の出退勤データを読み込み
+  useEffect(() => {
+    (async () => {
+      const remote = await gasGet("getClock");
+      if (remote && remote.length > 0) {
+        remote.forEach(r => {
+          if (r.date && r.member) {
+            setClockData(r.member, r.date, { clockIn: r.clockIn, clockOut: r.clockOut || null });
+          }
+        });
+        // 自分のデータを再読み込み
+        setClockState(getClockData(ME, todayKey));
+      }
+    })();
+  }, []);
 
   useEffect(() => {
     const iv = setInterval(() => setTick(t => t + 1), 60000);
@@ -329,15 +345,21 @@ function ClockScreen({ currentUser }) {
 
   const status = clockState?.clockOut ? "done" : clockState?.clockIn ? "working" : "none";
 
+  const syncClockToGas = (data) => {
+    gasPost("saveClock", { date: todayKey, member: ME, clockIn: data.clockIn, clockOut: data.clockOut || "", updatedAt: new Date().toISOString() });
+  };
+
   const handleClock = () => {
     if (status === "none") {
       const data = { clockIn: nowHHMM(), clockOut: null };
       setClockData(ME, todayKey, data);
       setClockState(data);
+      syncClockToGas(data);
     } else if (status === "working") {
       const data = { ...clockState, clockOut: nowHHMM() };
       setClockData(ME, todayKey, data);
       setClockState(data);
+      syncClockToGas(data);
     }
   };
 
@@ -350,11 +372,13 @@ function ClockScreen({ currentUser }) {
     const data = { ...clockState, [editing === "in" ? "clockIn" : "clockOut"]: editVal };
     setClockData(ME, todayKey, data);
     setClockState(data);
+    syncClockToGas(data);
     setEditing(null);
   };
   const resetClock = () => {
     localStorage.removeItem(`clock_${todayKey}_${ME}`);
     setClockState(null);
+    gasPost("saveClock", { date: todayKey, member: ME, clockIn: "", clockOut: "", updatedAt: new Date().toISOString() });
   };
 
   const workDuration = () => {
@@ -542,12 +566,36 @@ const DAY_END = "20:00";
 const PX = 0.6;
 
 function WorkScreen({ currentUser }) {
-  // 日付管理
   const todayStr = (() => {
     const d = new Date();
     return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,"0")}-${String(d.getDate()).padStart(2,"0")}`;
   })();
   const [selectedDate, setSelectedDate] = useState(todayStr);
+
+  // GASから全員の作業記録を読み込み
+  useEffect(() => {
+    (async () => {
+      const remote = await gasGet("getWork");
+      if (remote && remote.length > 0) {
+        remote.forEach(r => {
+          if (r.date && r.member && r.blocks) {
+            const bl = typeof r.blocks === "string" ? JSON.parse(r.blocks) : r.blocks;
+            saveWorkBlocks(r.member, r.date, bl);
+          }
+        });
+        // 自分の現在日のデータを再読み込み
+        const saved = getWorkBlocks(currentUser?.name || "", todayStr);
+        if (saved.length > 0) {
+          setBlocks(saved);
+          setDayLocked(saved.every(b => b.locked));
+        }
+      }
+    })();
+  }, []);
+
+  const syncWorkToGas = (dateKey, blocksData) => {
+    gasPost("saveWork", { date: dateKey, member: currentUser?.name || "", blocks: blocksData, updatedAt: new Date().toISOString() });
+  };
 
   const formatDateLabel = (dateStr) => {
     const d = new Date(dateStr + "T00:00:00");
@@ -607,6 +655,7 @@ function WorkScreen({ currentUser }) {
     const updated = [...blocks, newBlock];
     setBlocks(updated);
     saveWorkBlocks(ME, selectedDate, updated);
+    syncWorkToGas(selectedDate, updated);
     setDraft({ bizId: null, task: null, meetWith: null, endTime: null });
     setOpen(false);
   };
@@ -616,6 +665,7 @@ function WorkScreen({ currentUser }) {
     const updated = blocks.filter((_, i) => i !== idx);
     setBlocks(updated);
     saveWorkBlocks(ME, selectedDate, updated);
+    syncWorkToGas(selectedDate, updated);
   };
 
   const startEditBlock = (idx) => {
@@ -628,6 +678,7 @@ function WorkScreen({ currentUser }) {
     const updated = blocks.map((b, i) => i === editIdx ? editDraft : b);
     setBlocks(updated);
     saveWorkBlocks(ME, selectedDate, updated);
+    syncWorkToGas(selectedDate, updated);
     setEditIdx(null);
     setEditDraft(null);
   };
@@ -638,6 +689,7 @@ function WorkScreen({ currentUser }) {
     const locked = blocks.map(b => ({ ...b, locked: true }));
     setBlocks(locked);
     saveWorkBlocks(ME, selectedDate, locked);
+    syncWorkToGas(selectedDate, locked);
     setDayLocked(true);
     setOpen(false);
   };
@@ -1414,34 +1466,28 @@ function JournalScreen({ posts, setPosts, markRead, currentUser, memberNames }) 
   };
   const saveLocalPosts = (arr) => { localStorage.setItem(LS_JOURNAL_KEY, JSON.stringify(arr)); };
 
-  // 投稿を読み込む（Supabase → localStorage fallback）
+  // 投稿を読み込む（GAS → localStorage fallback）
   useEffect(() => {
     const loadPosts = async () => {
-      if (supabase) {
-        try {
-          const { data } = await supabase
-            .from('journal_posts')
-            .select('*')
-            .order('created_at', { ascending: false });
-          if (data && data.length > 0) {
-            const formatted = data.map(p => ({
-              id: p.id,
-              name: p.user_name,
-              time: new Date(p.created_at).toLocaleString('ja-JP', { month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit' }),
-              tag: p.tag,
-              color: TAG_COLORS[p.tag] || T.green,
-              content: p.content,
-              likes: p.likes || 0,
-              liked: false,
-              comments: p.comments || [],
-              showComments: false,
-              readBy: p.read_by || [],
-            }));
-            setPosts(formatted);
-            saveLocalPosts(formatted);
-            return;
-          }
-        } catch (e) { console.warn("Supabase load failed, using localStorage", e); }
+      // GASから読み込み
+      const remote = await gasGet("getJournal");
+      if (remote && remote.length > 0) {
+        const formatted = remote.map(p => ({
+          id: p.id,
+          name: p.name,
+          time: p.createdAt ? new Date(p.createdAt).toLocaleString('ja-JP', { month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit' }) : "",
+          tag: p.tag,
+          color: TAG_COLORS[p.tag] || T.green,
+          content: p.content,
+          likes: p.likes || 0,
+          liked: false,
+          comments: typeof p.comments === "string" ? JSON.parse(p.comments || "[]") : (p.comments || []),
+          showComments: false,
+          readBy: typeof p.readBy === "string" ? JSON.parse(p.readBy || "[]") : (p.readBy || []),
+        }));
+        setPosts(formatted);
+        saveLocalPosts(formatted);
+        return;
       }
       // fallback: localStorage
       const local = loadLocalPosts();
@@ -1463,19 +1509,11 @@ function JournalScreen({ posts, setPosts, markRead, currentUser, memberNames }) 
       showComments: false, readBy: [ME],
     };
 
-    // Supabaseに保存を試行
-    if (supabase) {
-      try {
-        const { data } = await supabase
-          .from('journal_posts')
-          .insert([{
-            user_name: ME, tag: draft.tag, content: draft.content,
-            likes: 0, read_by: [ME], comments: [],
-          }])
-          .select();
-        if (data && data[0]) newPost.id = data[0].id;
-      } catch (e) { console.warn("Supabase save failed, using localStorage", e); }
-    }
+    // GASに保存
+    gasPost("saveJournal", {
+      id: newPost.id, name: ME, tag: draft.tag, content: draft.content,
+      likes: 0, comments: [], readBy: [ME], createdAt: now.toISOString(),
+    });
 
     const updated = [newPost, ...posts];
     setPosts(updated);
@@ -1489,7 +1527,7 @@ function JournalScreen({ posts, setPosts, markRead, currentUser, memberNames }) 
     const post = posts.find(p => p.id === id);
     if (!post) return;
     const newLikes = post.liked ? post.likes - 1 : post.likes + 1;
-    if (supabase) { try { await supabase.from('journal_posts').update({ likes: newLikes }).eq('id', id); } catch {} }
+    gasPost("updateJournal", { likes: newLikes }, id);
     const updated = posts.map(p => p.id === id ? { ...p, liked: !p.liked, likes: newLikes } : p);
     setPosts(updated);
     saveLocalPosts(updated);
@@ -1501,7 +1539,7 @@ function JournalScreen({ posts, setPosts, markRead, currentUser, memberNames }) 
     const post = posts.find(p => p.id === id);
     if (post && !post.readBy.includes(ME)) {
       const newReadBy = [...post.readBy, ME];
-      if (supabase) { try { await supabase.from('journal_posts').update({ read_by: newReadBy }).eq('id', id); } catch {} }
+      gasPost("updateJournal", { readBy: newReadBy }, id);
       const updated2 = updated.map(p => p.id === id ? { ...p, readBy: newReadBy } : p);
       setPosts(updated2);
       saveLocalPosts(updated2);
@@ -1514,7 +1552,7 @@ function JournalScreen({ posts, setPosts, markRead, currentUser, memberNames }) 
     const post = posts.find(p => p.id === id);
     if (!post) return;
     const newComments = [...post.comments, `${ME}: ${text}`];
-    if (supabase) { try { await supabase.from('journal_posts').update({ comments: newComments }).eq('id', id); } catch {} }
+    gasPost("updateJournal", { comments: newComments }, id);
     const updated = posts.map(p => p.id === id ? { ...p, comments: newComments } : p);
     setPosts(updated);
     saveLocalPosts(updated);
@@ -1522,7 +1560,7 @@ function JournalScreen({ posts, setPosts, markRead, currentUser, memberNames }) 
   };
 
   const deletePost = async (id) => {
-    if (supabase) { try { await supabase.from('journal_posts').delete().eq('id', id); } catch {} }
+    gasPost("deleteJournal", null, id);
     const updated = posts.filter(p => p.id !== id);
     setPosts(updated);
     saveLocalPosts(updated);
@@ -1703,28 +1741,29 @@ function JournalScreen({ posts, setPosts, markRead, currentUser, memberNames }) 
 
 // ── LEAVE ──
 function LeaveScreen({ currentUser }) {
+  const ME = currentUser?.name || "";
   const [showForm, setShowForm] = useState(false);
   const [requests, setRequests] = useState([]);
   const [draft, setDraft] = useState({ date: "", days: "1" });
   const [loading, setLoading] = useState(false);
 
-  // Supabaseから読み込む
+  const LS_LEAVE_KEY = "leave_requests";
+  const loadLocalLeave = () => { try { return JSON.parse(localStorage.getItem(LS_LEAVE_KEY) || "[]"); } catch { return []; } };
+  const saveLocalLeave = (arr) => { localStorage.setItem(LS_LEAVE_KEY, JSON.stringify(arr)); };
+
+  // GASから読み込み → localStorage fallback
   useEffect(() => {
-    const loadRequests = async () => {
-      if (!supabase) return;
-      const { data } = await supabase
-        .from('leave_requests')
-        .select('*')
-        .eq('user_name', currentUser?.name)
-        .order('created_at', { ascending: false });
-      if (data) {
-        setRequests(data.map(r => ({
-          date: r.date, days: r.days, status: r.status,
+    (async () => {
+      const remote = await gasGet("getSchedule"); // leaveは別action追加予定、今はlocalStorageのみ
+      // localStorageから読み込み
+      const local = loadLocalLeave();
+      if (local.length > 0) {
+        setRequests(local.filter(r => r.member === ME).map(r => ({
+          id: r.id, date: r.date, days: r.days, status: r.status, member: r.member,
           color: r.status === '承認済' ? T.green : T.warn,
         })));
       }
-    };
-    if (currentUser?.name) loadRequests();
+    })();
   }, [currentUser]);
 
   const usedDays = requests.filter(r => r.status === "承認済").reduce((a, r) => a + r.days, 0);
@@ -1733,23 +1772,22 @@ function LeaveScreen({ currentUser }) {
 
   const submitRequest = async () => {
     if (!draft.date) return;
-    if (!supabase) return;
     setLoading(true);
-    const { data } = await supabase
-      .from('leave_requests')
-      .insert([{
-        user_name: currentUser?.name,
-        date: draft.date,
-        days: Number(draft.days),
-        status: '申請中',
-      }])
-      .select();
-    if (data && data[0]) {
-      setRequests(prev => [{
-        date: draft.date, days: Number(draft.days),
-        status: '申請中', color: T.warn,
-      }, ...prev]);
-    }
+    const newReq = {
+      id: Date.now().toString(), member: ME,
+      date: draft.date, days: Number(draft.days), status: '申請中',
+    };
+    const all = [...loadLocalLeave(), newReq];
+    saveLocalLeave(all);
+    setRequests(prev => [{
+      ...newReq, color: T.warn,
+    }, ...prev]);
+    // GASにスケジュールとして保存（有給イベント）
+    gasPost("saveSchedule", {
+      id: newReq.id, title: `有給休暇（${ME.split(" ")[0]}）`, date: draft.date,
+      startTime: "00:00", endTime: "23:59", category: "プライベート",
+      member: ME, memo: `${draft.days}日間`, createdBy: ME, updatedAt: new Date().toISOString(),
+    });
     setDraft({ date: "", days: "1" });
     setShowForm(false);
     setLoading(false);
