@@ -33,6 +33,75 @@ const T = {
   indigo: "#6366F1", amber: "#F59E0B",
 };
 
+// ── localStorage → GAS マイグレーション ──
+async function migrateLocalDataToGas() {
+  if (!GAS_URL) return;
+  if (localStorage.getItem("kanwaru_migrated") === "done") return;
+
+  console.log("Migrating localStorage data to GAS...");
+  let count = 0;
+
+  // 出退勤データ
+  for (let i = 0; i < localStorage.length; i++) {
+    const key = localStorage.key(i);
+    if (key && key.startsWith("clock_")) {
+      try {
+        const parts = key.replace("clock_", "").split("_");
+        const date = parts[0];
+        const member = parts.slice(1).join("_");
+        const data = JSON.parse(localStorage.getItem(key));
+        if (data && data.clockIn) {
+          await gasPost("saveClock", { date, member, clockIn: data.clockIn, clockOut: data.clockOut || "", updatedAt: new Date().toISOString() });
+          count++;
+        }
+      } catch {}
+    }
+  }
+
+  // 作業記録データ
+  for (let i = 0; i < localStorage.length; i++) {
+    const key = localStorage.key(i);
+    if (key && key.startsWith("work_")) {
+      try {
+        const parts = key.replace("work_", "").split("_");
+        const date = parts[0];
+        const member = parts.slice(1).join("_");
+        const blocks = JSON.parse(localStorage.getItem(key));
+        if (blocks && blocks.length > 0) {
+          await gasPost("saveWork", { date, member, blocks, updatedAt: new Date().toISOString() });
+          count++;
+        }
+      } catch {}
+    }
+  }
+
+  // スケジュールデータ
+  try {
+    const schedules = JSON.parse(localStorage.getItem("schedule_events") || "[]");
+    for (const ev of schedules) {
+      await gasPost("saveSchedule", { ...ev, updatedAt: new Date().toISOString() });
+      count++;
+    }
+  } catch {}
+
+  // 日誌データ
+  try {
+    const posts = JSON.parse(localStorage.getItem("journal_posts") || "[]");
+    for (const p of posts) {
+      await gasPost("saveJournal", {
+        id: p.id, name: p.name, tag: p.tag, content: p.content,
+        likes: p.likes || 0, comments: p.comments || [], readBy: p.readBy || [],
+        createdAt: p.time || new Date().toISOString(),
+      });
+      count++;
+    }
+  } catch {}
+
+  localStorage.setItem("kanwaru_migrated", "done");
+  console.log(`Migration complete: ${count} items synced to GAS`);
+  return count;
+}
+
 const today = new Date();
 const dateStr = `${today.getFullYear()}年${today.getMonth()+1}月${today.getDate()}日（${["日","月","火","水","木","金","土"][today.getDay()]}）`;
 
@@ -2415,10 +2484,25 @@ export default function App() {
   const [currentUser, setCurrentUser] = useState(null);
   const [screen, setScreen] = useState("home");
   const [posts, setPosts] = useState(INITIAL_POSTS);
+  const [migrating, setMigrating] = useState(false);
+  const [migrateCount, setMigrateCount] = useState(null);
+
+  // ログイン時にマイグレーション実行
+  const handleLogin = async (member) => {
+    setCurrentUser(member);
+    setScreen("home");
+    if (localStorage.getItem("kanwaru_migrated") !== "done" && GAS_URL) {
+      setMigrating(true);
+      const count = await migrateLocalDataToGas();
+      setMigrateCount(count || 0);
+      setMigrating(false);
+      setTimeout(() => setMigrateCount(null), 5000);
+    }
+  };
 
   // ログイン前はログイン画面を表示
   if (!currentUser) {
-    return <LoginScreen onLogin={(member) => { setCurrentUser(member); setScreen("home"); }} />;
+    return <LoginScreen onLogin={handleLogin} />;
   }
 
   const ME = currentUser.name;
@@ -2468,6 +2552,20 @@ export default function App() {
           }}>退出</button>
         </div>
       </div>
+
+      {/* マイグレーション通知 */}
+      {migrating && (
+        <div style={{ background: "#EEF2FF", padding: "10px 16px", textAlign: "center",
+          fontSize: 12, color: T.indigo, fontFamily: "'Noto Sans JP', sans-serif", fontWeight: 700 }}>
+          🔄 過去のデータをサーバーに同期中...
+        </div>
+      )}
+      {migrateCount !== null && !migrating && (
+        <div style={{ background: T.greenP, padding: "10px 16px", textAlign: "center",
+          fontSize: 12, color: T.green, fontFamily: "'Noto Sans JP', sans-serif", fontWeight: 700 }}>
+          ✅ {migrateCount}件のデータをサーバーに同期しました
+        </div>
+      )}
 
       {/* メインコンテンツ */}
       <div style={{ paddingBottom: "70px" }}>
