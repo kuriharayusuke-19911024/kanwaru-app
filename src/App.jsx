@@ -1,5 +1,6 @@
 import { useState, useEffect } from "react";
 import { supabase } from './supabase.js';
+import { PieChart, Pie, Cell, ResponsiveContainer, Tooltip } from "recharts";
 
 // ── GAS Backend API ──
 // GASデプロイ後にここにURLを設定してください
@@ -691,6 +692,10 @@ function WorkScreen({ currentUser }) {
   };
 
   const ME = currentUser?.name || "";
+  // 管理者のみ他メンバーの集計も閲覧可能
+  const IS_ADMIN = ME === "栗原 優介";
+  const [aggregateMember, setAggregateMember] = useState(ME);
+  const AGG_NAME = IS_ADMIN ? aggregateMember : ME;
   const [blocks, setBlocks] = useState(() => getWorkBlocks(ME, selectedDate));
   const [open, setOpen]      = useState(true);
   const [tab, setTab]        = useState("today");
@@ -766,11 +771,11 @@ function WorkScreen({ currentUser }) {
   const dayStart = toMin(CLOCKIN);
   const totalMin = toMin(DAY_END) - dayStart;
 
-  // 週次データ（localStorageから読み込み）
+  // 週次データ（localStorageから読み込み）※集計対象メンバー（AGG_NAME）
   const weekDates = getWeekDates(selectedDate);
   const dayNameMap = ["日","月","火","水","木","金","土"];
   const weeklyData = weekDates.map(dateKey => {
-    const saved = getWorkBlocks(ME, dateKey);
+    const saved = getWorkBlocks(AGG_NAME, dateKey);
     const works = saved.map(b => ({
       bizId: b.bizId, task: b.task,
       mins: toMin(b.end) - toMin(b.start),
@@ -784,10 +789,10 @@ function WorkScreen({ currentUser }) {
     return { ...b, total };
   }).filter(b => b.total > 0);
 
-  // 月次データ（localStorageから読み込み）
+  // 月次データ
   const monthDates = getMonthDates(selectedDate);
   const allMonthBlocks = monthDates.flatMap(dateKey => {
-    const saved = getWorkBlocks(ME, dateKey);
+    const saved = getWorkBlocks(AGG_NAME, dateKey);
     return saved.map(b => ({ bizId: b.bizId, mins: toMin(b.end) - toMin(b.start) }));
   });
   const monthlyBizMap = {};
@@ -808,7 +813,7 @@ function WorkScreen({ currentUser }) {
     const daysInMonth = new Date(yy, mm + 1, 0).getDate();
     for (let d = 1; d <= daysInMonth; d++) {
       const dk = `${yy}-${String(mm+1).padStart(2,"0")}-${String(d).padStart(2,"0")}`;
-      const saved = getWorkBlocks(ME, dk);
+      const saved = getWorkBlocks(AGG_NAME, dk);
       saved.forEach(b => allYearBlocks.push({ bizId: b.bizId, mins: toMin(b.end) - toMin(b.start) }));
     }
   }
@@ -819,6 +824,74 @@ function WorkScreen({ currentUser }) {
   });
   const yearlyBiz = Object.keys(yearlyBizMap).map(bizId => ({ bizId, mins: yearlyBizMap[bizId] }));
   const totalYearly = allYearBlocks.reduce((a, b) => a + b.mins, 0);
+
+  // 円グラフ用データ整形（事業ラベル・色付き）
+  const toPieData = (arr) => arr
+    .map(item => {
+      const b = bizOf(item.bizId);
+      return b ? { name: b.label, value: item.mins, color: b.color, icon: b.icon } : null;
+    })
+    .filter(Boolean)
+    .filter(d => d.value > 0);
+
+  const weeklyPieData = toPieData(
+    BIZ.map(b => ({ bizId: b.id, mins: weeklyBizTotals.find(t => t.id === b.id)?.total || 0 }))
+  );
+  const monthlyPieData = toPieData(monthlyBiz);
+  const yearlyPieData = toPieData(yearlyBiz);
+
+  // 円グラフコンポーネント
+  const BizPieChart = ({ data, totalMins }) => {
+    if (!data || data.length === 0) {
+      return (
+        <div style={{ textAlign: "center", padding: "30px 0", color: T.gray, fontSize: 11, fontFamily: "'Noto Sans JP', sans-serif" }}>
+          データがありません
+        </div>
+      );
+    }
+    return (
+      <div style={{ width: "100%", height: 220, marginBottom: 8 }}>
+        <ResponsiveContainer width="100%" height="100%">
+          <PieChart>
+            <Pie data={data} dataKey="value" nameKey="name" cx="50%" cy="50%"
+              outerRadius={75} innerRadius={40} paddingAngle={2}
+              label={({ name, percent }) => `${name} ${Math.round(percent * 100)}%`}
+              labelLine={false}
+              style={{ fontSize: 10, fontFamily: "'Noto Sans JP', sans-serif" }}>
+              {data.map((entry, i) => (
+                <Cell key={i} fill={entry.color} />
+              ))}
+            </Pie>
+            <Tooltip formatter={(value) => `${Math.floor(value / 60)}時間${value % 60}分`} />
+          </PieChart>
+        </ResponsiveContainer>
+        <div style={{ textAlign: "center", fontSize: 11, color: T.gray, fontFamily: "'Noto Sans JP', sans-serif" }}>
+          合計 {Math.floor(totalMins / 60)}時間{totalMins % 60 > 0 ? ` ${totalMins % 60}分` : ""}
+        </div>
+      </div>
+    );
+  };
+
+  const totalWeekly = weeklyData.flatMap(d => d.works).reduce((a, w) => a + w.mins, 0);
+
+  // 集計タブ共通：メンバー切替UI（管理者のみ）
+  const MemberSwitcher = () => {
+    if (!IS_ADMIN) return null;
+    return (
+      <div style={{ display: "flex", gap: 4, marginBottom: 10, flexWrap: "wrap" }}>
+        {MEMBERS.map(m => (
+          <button key={m.name} onClick={() => setAggregateMember(m.name)} style={{
+            flex: 1, minWidth: 80,
+            background: aggregateMember === m.name ? m.color : T.grayL,
+            color: aggregateMember === m.name ? "white" : T.gray,
+            border: "none", borderRadius: 8, padding: "6px 6px",
+            fontSize: 10, fontWeight: 700, cursor: "pointer",
+            fontFamily: "'Noto Sans JP', sans-serif",
+          }}>{m.icon} {m.name.split(" ")[0]}</button>
+        ))}
+      </div>
+    );
+  };
 
 
   // タイムライン
@@ -1347,9 +1420,12 @@ function WorkScreen({ currentUser }) {
         {/* 週次 */}
         {tab === "weekly" && (
           <>
+            <MemberSwitcher />
             <div style={{ fontSize: 11, color: T.gray, fontFamily: "'Noto Sans JP', sans-serif", marginBottom: 10 }}>
-              今週（月〜日）の作業内訳
+              今週（月〜日）の作業内訳{IS_ADMIN && aggregateMember !== ME ? `（${aggregateMember}）` : ""}
             </div>
+            {/* 円グラフ */}
+            <BizPieChart data={weeklyPieData} totalMins={totalWeekly} />
 
             {/* 曜日別リスト */}
             {weeklyData.map((day, i) => {
@@ -1442,9 +1518,12 @@ function WorkScreen({ currentUser }) {
         {/* 月次 */}
         {tab === "monthly" && (
           <>
+            <MemberSwitcher />
             <div style={{ fontSize: 11, color: T.gray, fontFamily: "'Noto Sans JP', sans-serif", marginBottom: 10 }}>
-              今月の事業別内訳
+              今月の事業別内訳{IS_ADMIN && aggregateMember !== ME ? `（${aggregateMember}）` : ""}
             </div>
+            {/* 円グラフ */}
+            <BizPieChart data={monthlyPieData} totalMins={totalMonthly} />
             {monthlyBiz.map((item, i) => {
               const b = bizOf(item.bizId);
               const pct = Math.round((item.mins / totalMonthly) * 100);
@@ -1479,9 +1558,12 @@ function WorkScreen({ currentUser }) {
         {/* 年次 */}
         {tab === "yearly" && (
           <>
+            <MemberSwitcher />
             <div style={{ fontSize: 11, color: T.gray, fontFamily: "'Noto Sans JP', sans-serif", marginBottom: 10 }}>
-              今年度（4月〜3月）事業別内訳
+              今年度（4月〜3月）事業別内訳{IS_ADMIN && aggregateMember !== ME ? `（${aggregateMember}）` : ""}
             </div>
+            {/* 円グラフ */}
+            <BizPieChart data={yearlyPieData} totalMins={totalYearly} />
             {yearlyBiz.map((item, i) => {
               const b = bizOf(item.bizId);
               const pct = Math.round((item.mins / totalYearly) * 100);
@@ -1524,9 +1606,39 @@ function JournalScreen({ posts, setPosts, markRead, currentUser, memberNames }) 
   const TAG_COLORS = { "報告": T.green, "連絡": T.skyL, "重要": T.danger };
 
   const [showForm, setShowForm] = useState(false);
-  const [draft, setDraft] = useState({ content: "", tag: "報告" });
+  const [draft, setDraft] = useState({ content: "", tag: "報告", mood: "", energy: 0, oneline: "" });
   const [commentText, setCommentText] = useState({});
   const [loading, setLoading] = useState(false);
+  const [recording, setRecording] = useState(false);
+
+  // 感覚入力オプション
+  const MOOD_OPTIONS = [
+    { id: "good",  emoji: "😊", label: "良い",    color: T.green  },
+    { id: "ok",    emoji: "😐", label: "普通",    color: T.skyL   },
+    { id: "tired", emoji: "😫", label: "疲れた",  color: T.amber  },
+    { id: "bad",   emoji: "🤒", label: "不調",    color: T.danger },
+  ];
+
+  // 音声入力（Web Speech API）
+  const startVoiceInput = () => {
+    const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
+    if (!SR) {
+      alert("このブラウザは音声入力に対応していません");
+      return;
+    }
+    const rec = new SR();
+    rec.lang = "ja-JP";
+    rec.interimResults = false;
+    rec.continuous = false;
+    rec.onstart = () => setRecording(true);
+    rec.onend = () => setRecording(false);
+    rec.onerror = () => setRecording(false);
+    rec.onresult = (ev) => {
+      const text = ev.results[0][0].transcript;
+      setDraft(d => ({ ...d, oneline: (d.oneline ? d.oneline + " " : "") + text }));
+    };
+    rec.start();
+  };
 
   // localStorage helpers for journal
   const LS_JOURNAL_KEY = "journal_posts";
@@ -1553,6 +1665,9 @@ function JournalScreen({ posts, setPosts, markRead, currentUser, memberNames }) 
           comments: typeof p.comments === "string" ? JSON.parse(p.comments || "[]") : (p.comments || []),
           showComments: false,
           readBy: typeof p.readBy === "string" ? JSON.parse(p.readBy || "[]") : (p.readBy || []),
+          mood: p.mood || "",
+          energy: p.energy || 0,
+          oneline: p.oneline || "",
         }));
         setPosts(formatted);
         saveLocalPosts(formatted);
@@ -1576,18 +1691,22 @@ function JournalScreen({ posts, setPosts, markRead, currentUser, memberNames }) 
       name: ME, time: timeStr, tag: draft.tag, color: col,
       content: draft.content, likes: 0, liked: false, comments: [],
       showComments: false, readBy: [ME],
+      mood: draft.mood || "",
+      energy: draft.energy || 0,
+      oneline: draft.oneline || "",
     };
 
     // GASに保存
     gasPost("saveJournal", {
       id: newPost.id, name: ME, tag: draft.tag, content: draft.content,
       likes: 0, comments: [], readBy: [ME], createdAt: now.toISOString(),
+      mood: draft.mood || "", energy: draft.energy || 0, oneline: draft.oneline || "",
     });
 
     const updated = [newPost, ...posts];
     setPosts(updated);
     saveLocalPosts(updated);
-    setDraft({ content: "", tag: "報告" });
+    setDraft({ content: "", tag: "報告", mood: "", energy: 0, oneline: "" });
     setShowForm(false);
     setLoading(false);
   };
@@ -1654,6 +1773,66 @@ function JournalScreen({ posts, setPosts, markRead, currentUser, memberNames }) 
         <Card style={{ borderTop: `4px solid ${TAG_COLORS[draft.tag]}` }}>
           <div style={{ fontWeight: 700, fontSize: 13, color: T.green,
             fontFamily: "'Noto Sans JP', sans-serif", marginBottom: 10 }}>📝 新しい投稿</div>
+
+          {/* 感覚入力（オプション） */}
+          <div style={{ padding: "12px 12px 10px", background: T.greenP, borderRadius: 12, marginBottom: 12 }}>
+            <div style={{ fontSize: 11, fontWeight: 800, color: T.green, fontFamily: "'Noto Sans JP', sans-serif", marginBottom: 8 }}>
+              🌟 今日の感覚（任意）
+            </div>
+
+            {/* 体調 */}
+            <div style={{ marginBottom: 10 }}>
+              <div style={{ fontSize: 10, fontWeight: 700, color: T.gray, fontFamily: "'Noto Sans JP', sans-serif", marginBottom: 5 }}>体調</div>
+              <div style={{ display: "flex", gap: 5, flexWrap: "wrap" }}>
+                {MOOD_OPTIONS.map(m => (
+                  <button key={m.id} onClick={() => setDraft(d => ({ ...d, mood: d.mood === m.id ? "" : m.id }))} style={{
+                    background: draft.mood === m.id ? m.color : "white",
+                    color: draft.mood === m.id ? "white" : "#374151",
+                    border: `1.5px solid ${draft.mood === m.id ? m.color : T.grayL}`,
+                    borderRadius: 20, padding: "6px 12px", fontSize: 12,
+                    fontWeight: 700, cursor: "pointer",
+                    fontFamily: "'Noto Sans JP', sans-serif",
+                  }}>{m.emoji} {m.label}</button>
+                ))}
+              </div>
+            </div>
+
+            {/* 体力消耗度 */}
+            <div style={{ marginBottom: 10 }}>
+              <div style={{ fontSize: 10, fontWeight: 700, color: T.gray, fontFamily: "'Noto Sans JP', sans-serif", marginBottom: 5 }}>
+                体力消耗度 {draft.energy > 0 ? `(${draft.energy}/5)` : ""}
+              </div>
+              <div style={{ display: "flex", gap: 6 }}>
+                {[1, 2, 3, 4, 5].map(n => (
+                  <button key={n} onClick={() => setDraft(d => ({ ...d, energy: d.energy === n ? 0 : n }))} style={{
+                    flex: 1, background: draft.energy >= n ? T.amber : "white",
+                    color: draft.energy >= n ? "white" : T.gray,
+                    border: `1.5px solid ${draft.energy >= n ? T.amber : T.grayL}`,
+                    borderRadius: 10, padding: "8px 0", fontSize: 14,
+                    fontWeight: 700, cursor: "pointer",
+                  }}>⚡️</button>
+                ))}
+              </div>
+            </div>
+
+            {/* ひとこと（音声入力対応） */}
+            <div>
+              <div style={{ fontSize: 10, fontWeight: 700, color: T.gray, fontFamily: "'Noto Sans JP', sans-serif", marginBottom: 5 }}>ひとこと</div>
+              <div style={{ display: "flex", gap: 6 }}>
+                <input value={draft.oneline}
+                  onChange={e => setDraft(d => ({ ...d, oneline: e.target.value }))}
+                  placeholder="例：今日はいい天気だった"
+                  style={{ flex: 1, borderRadius: 10, border: `1.5px solid ${T.grayL}`, padding: "9px 12px",
+                    fontSize: 12, fontFamily: "'Noto Sans JP', sans-serif", outline: "none", boxSizing: "border-box", background: "white" }} />
+                <button onClick={startVoiceInput} disabled={recording} title="音声入力" style={{
+                  background: recording ? T.danger : T.green, color: "white",
+                  border: "none", borderRadius: 10, padding: "0 14px", fontSize: 16,
+                  cursor: recording ? "default" : "pointer",
+                }}>{recording ? "🔴" : "🎤"}</button>
+              </div>
+            </div>
+          </div>
+
           <div style={{ marginBottom: 10 }}>
             <div style={{ fontSize: 10, fontWeight: 700, color: T.gray,
               fontFamily: "'Noto Sans JP', sans-serif", marginBottom: 6 }}>種類</div>
@@ -1717,6 +1896,31 @@ function JournalScreen({ posts, setPosts, markRead, currentUser, memberNames }) 
               </div>
               <Tag label={p.tag} color={p.color} bg={`${p.color}18`} />
             </div>
+
+            {/* 感覚バッジ（あれば表示） */}
+            {(p.mood || p.energy > 0 || p.oneline) && (
+              <div style={{ display: "flex", alignItems: "center", gap: 6, flexWrap: "wrap",
+                marginBottom: 8, padding: "6px 10px", background: T.greenP, borderRadius: 10 }}>
+                {p.mood && (() => {
+                  const mo = MOOD_OPTIONS.find(x => x.id === p.mood);
+                  return mo ? (
+                    <span style={{ fontSize: 11, fontFamily: "'Noto Sans JP', sans-serif", color: mo.color, fontWeight: 700 }}>
+                      {mo.emoji} {mo.label}
+                    </span>
+                  ) : null;
+                })()}
+                {p.energy > 0 && (
+                  <span style={{ fontSize: 11, fontFamily: "'Noto Sans JP', sans-serif", color: T.amber, fontWeight: 700 }}>
+                    {"⚡️".repeat(p.energy)}
+                  </span>
+                )}
+                {p.oneline && (
+                  <span style={{ fontSize: 11, fontFamily: "'Noto Sans JP', sans-serif", color: T.gray, fontStyle: "italic" }}>
+                    「{p.oneline}」
+                  </span>
+                )}
+              </div>
+            )}
 
             <div style={{ fontSize: 13, lineHeight: 1.6, fontFamily: "'Noto Sans JP', sans-serif", color: "#374151",
               wordBreak: "break-word", whiteSpace: "pre-wrap" }}>
@@ -1985,6 +2189,9 @@ function ScheduleScreen({ currentUser }) {
   const todayStr = getTodayKey();
   const [selectedDate, setSelectedDate] = useState(todayStr);
   const [events, setEvents] = useState(() => loadSchedule());
+  const [googleEvents, setGoogleEvents] = useState([]);
+  const [googleSyncOn, setGoogleSyncOn] = useState(() => localStorage.getItem("google_sync_on") === "1");
+  const [googleLoading, setGoogleLoading] = useState(false);
   const [showForm, setShowForm] = useState(false);
   const [gasUrl, setGasUrl] = useState(GAS_URL);
   const [showSettings, setShowSettings] = useState(false);
@@ -2005,7 +2212,41 @@ function ScheduleScreen({ currentUser }) {
   }, []);
   const [viewMode, setViewMode] = useState("month"); // "month" | "week" | "day"
   const [editId, setEditId] = useState(null);
-  const [draft, setDraft] = useState({ title: "", date: todayStr, startTime: "09:00", endTime: "10:00", category: "仕事", member: ME, memo: "" });
+  const [draft, setDraft] = useState({ title: "", date: todayStr, startTime: "09:00", endTime: "10:00", category: "仕事", member: ME, memo: "", syncGoogle: false });
+
+  // 表示中の年月
+  const selDForGoogle = new Date(selectedDate + "T00:00:00");
+  const currentYM = `${selDForGoogle.getFullYear()}-${String(selDForGoogle.getMonth()+1).padStart(2,"0")}`;
+
+  // Googleカレンダー取得
+  const fetchGoogleEvents = async (ym) => {
+    if (!GAS_URL || !googleSyncOn) return;
+    setGoogleLoading(true);
+    try {
+      const res = await fetch(GAS_URL + "?action=getGoogleCalendar&month=" + ym);
+      const json = await res.json();
+      if (json.result === "ok" && Array.isArray(json.data)) {
+        setGoogleEvents(json.data);
+      } else {
+        console.warn("Google Calendar fetch failed:", json.message);
+      }
+    } catch (e) {
+      console.warn("Google Calendar fetch error:", e);
+    } finally {
+      setGoogleLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    if (googleSyncOn) fetchGoogleEvents(currentYM);
+    else setGoogleEvents([]);
+  }, [googleSyncOn, currentYM]);
+
+  const toggleGoogleSync = () => {
+    const next = !googleSyncOn;
+    setGoogleSyncOn(next);
+    localStorage.setItem("google_sync_on", next ? "1" : "0");
+  };
 
   const dayNames = ["日","月","火","水","木","金","土"];
   const selD = new Date(selectedDate + "T00:00:00");
@@ -2019,7 +2260,25 @@ function ScheduleScreen({ currentUser }) {
   for (let d = 1; d <= lastDate; d++) calCells.push(d);
 
   const dateKey = (d) => `${selYear}-${String(selMonth+1).padStart(2,"0")}-${String(d).padStart(2,"0")}`;
+  // Googleカレンダーのイベントをカテゴリ付きで正規化（栗原 優介のカレンダーのみ連携）
+  const GOOGLE_OWNER = "栗原 優介";
+  const googleEventsNormalized = googleEvents.map(g => ({
+    id: "gcal_" + g.id,
+    googleId: g.id,
+    title: g.title,
+    date: g.date,
+    startTime: g.startTime,
+    endTime: g.endTime,
+    category: "Google",
+    member: GOOGLE_OWNER,
+    memo: g.memo || "",
+    location: g.location || "",
+    source: "google",
+  }));
+  // 通常の予定のみ（Google由来は含めない）
   const eventsOn = (dk) => events.filter(e => e.date === dk);
+  // 選択日の全予定（Google含む）
+  const allEventsOn = (dk) => [...events, ...googleEventsNormalized].filter(e => e.date === dk);
 
   const goMonth = (delta) => {
     const nd = new Date(selYear, selMonth + delta, 1);
@@ -2027,19 +2286,51 @@ function ScheduleScreen({ currentUser }) {
   };
 
   const openAdd = (dateStr) => {
-    setDraft({ title: "", date: dateStr || selectedDate, startTime: "09:00", endTime: "10:00", category: "仕事", member: ME, memo: "" });
+    setDraft({ title: "", date: dateStr || selectedDate, startTime: "09:00", endTime: "10:00", category: "仕事", member: ME, memo: "", syncGoogle: googleSyncOn });
     setEditId(null);
     setShowForm(true);
   };
   const openEdit = (ev) => {
-    setDraft({ title: ev.title, date: ev.date, startTime: ev.startTime, endTime: ev.endTime, category: ev.category, member: ev.member, memo: ev.memo || "" });
+    setDraft({
+      title: ev.title,
+      date: ev.date,
+      startTime: ev.startTime,
+      endTime: ev.endTime,
+      category: ev.category,
+      member: ev.member,
+      memo: ev.memo || "",
+      syncGoogle: ev.source === "google",
+      googleId: ev.googleId,
+      source: ev.source,
+    });
     setEditId(ev.id);
     setShowForm(true);
   };
   const saveDraft = async () => {
     if (!draft.title.trim() || !draft.date) return;
-    let updated;
     const now = new Date().toISOString();
+
+    // Googleカレンダー由来のイベント編集
+    if (draft.source === "google" && draft.googleId) {
+      await fetch(GAS_URL, {
+        method: "POST",
+        body: JSON.stringify({
+          action: "updateGoogleCalendar",
+          id: draft.googleId,
+          data: {
+            title: draft.title, date: draft.date,
+            startTime: draft.startTime, endTime: draft.endTime,
+            memo: draft.memo,
+          },
+        }),
+      }).catch(e => console.warn("update google error", e));
+      await fetchGoogleEvents(currentYM);
+      setShowForm(false);
+      setEditId(null);
+      return;
+    }
+
+    let updated;
     if (editId) {
       const newData = { ...draft, updatedAt: now };
       updated = events.map(e => e.id === editId ? { ...e, ...newData } : e);
@@ -2048,17 +2339,54 @@ function ScheduleScreen({ currentUser }) {
       const newEvent = { ...draft, id: Date.now().toString(), createdBy: ME, updatedAt: now };
       updated = [...events, newEvent];
       gasPost("saveSchedule", newEvent);
+
+      // Googleカレンダーにも追加
+      if (draft.syncGoogle && GAS_URL) {
+        try {
+          await fetch(GAS_URL, {
+            method: "POST",
+            body: JSON.stringify({
+              action: "addGoogleCalendar",
+              data: {
+                title: draft.title, date: draft.date,
+                startTime: draft.startTime, endTime: draft.endTime,
+                memo: draft.memo,
+              },
+            }),
+          });
+          // 同期したら再取得
+          if (googleSyncOn) fetchGoogleEvents(currentYM);
+        } catch (e) { console.warn("add google error", e); }
+      }
     }
     setEvents(updated);
     saveSchedule(updated);
     setShowForm(false);
     setEditId(null);
   };
-  const deleteEvent = (id) => {
-    const updated = events.filter(e => e.id !== id);
+  const deleteEvent = async (ev) => {
+    // ev はオブジェクトまたはID
+    const targetEvent = typeof ev === "object" ? ev : events.find(e => e.id === ev);
+    if (!targetEvent) return;
+
+    // Googleカレンダー由来
+    if (targetEvent.source === "google" && targetEvent.googleId) {
+      await fetch(GAS_URL, {
+        method: "POST",
+        body: JSON.stringify({
+          action: "deleteGoogleCalendar",
+          id: targetEvent.googleId,
+          data: {},
+        }),
+      }).catch(e => console.warn("delete google error", e));
+      await fetchGoogleEvents(currentYM);
+      return;
+    }
+
+    const updated = events.filter(e => e.id !== targetEvent.id);
     setEvents(updated);
     saveSchedule(updated);
-    gasPost("deleteSchedule", null, id);
+    gasPost("deleteSchedule", null, targetEvent.id);
   };
 
   // 選択日のイベント
@@ -2066,17 +2394,28 @@ function ScheduleScreen({ currentUser }) {
   // 週のイベント
   const weekDates = getWeekDates(selectedDate);
 
-  const catColor = (cat) => SCHEDULE_COLORS.find(c => c.label === cat) || SCHEDULE_COLORS[4];
+  const catColor = (cat) => {
+    if (cat === "Google") return { label: "Google", color: "#4285F4", bg: "#E8F0FE" };
+    return SCHEDULE_COLORS.find(c => c.label === cat) || SCHEDULE_COLORS[4];
+  };
 
   return (
     <div style={{ padding: "16px 14px 100px", display: "flex", flexDirection: "column", gap: 12 }}>
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
         <div style={{ fontWeight: 800, fontSize: 18, color: T.green, fontFamily: "'Noto Sans JP', sans-serif" }}>📅 スケジュール</div>
-        <button onClick={() => openAdd(selectedDate)} style={{
-          background: T.green, color: "white", border: "none", borderRadius: 20,
-          padding: "7px 16px", fontSize: 12, cursor: "pointer",
-          fontFamily: "'Noto Sans JP', sans-serif", fontWeight: 700,
-        }}>＋ 予定追加</button>
+        <div style={{ display: "flex", gap: 6 }}>
+          <button onClick={toggleGoogleSync} title="Googleカレンダーと同期" style={{
+            background: googleSyncOn ? "#4285F4" : T.grayL,
+            color: googleSyncOn ? "white" : T.gray, border: "none", borderRadius: 20,
+            padding: "7px 12px", fontSize: 11, cursor: "pointer",
+            fontFamily: "'Noto Sans JP', sans-serif", fontWeight: 700,
+          }}>{googleLoading ? "⏳" : "📆"} Google{googleSyncOn ? "ON" : "OFF"}</button>
+          <button onClick={() => openAdd(selectedDate)} style={{
+            background: T.green, color: "white", border: "none", borderRadius: 20,
+            padding: "7px 16px", fontSize: 12, cursor: "pointer",
+            fontFamily: "'Noto Sans JP', sans-serif", fontWeight: 700,
+          }}>＋ 予定追加</button>
+        </div>
       </div>
 
       {/* 表示切替 */}
@@ -2229,7 +2568,7 @@ function ScheduleScreen({ currentUser }) {
                 <button onClick={() => openEdit(ev)} style={{
                   background: "none", border: "none", cursor: "pointer", fontSize: 13, color: T.skyL, padding: "2px",
                 }}>✏️</button>
-                <button onClick={() => deleteEvent(ev.id)} style={{
+                <button onClick={() => deleteEvent(ev)} style={{
                   background: "none", border: "none", cursor: "pointer", fontSize: 13, color: "#ccc", padding: "2px",
                 }}>🗑️</button>
               </div>
@@ -2244,7 +2583,22 @@ function ScheduleScreen({ currentUser }) {
           👥 チームの予定（{(() => { const d = new Date(selectedDate+"T00:00:00"); return `${d.getMonth()+1}/${d.getDate()}`; })()}）
         </div>
         {MEMBERS.map((m, i) => {
-          const mEvents = eventsOn(selectedDate).filter(e => e.member === m.name);
+          // ローカル予定 + Google予定（栗原 優介のみ）を含めたメンバー別フィルタ
+          // 大きな予定（終日予定）を上、小さな予定（時間指定）を下にソート
+          const isBigEvent = (e) => {
+            // 終日 (00:00〜23:59) または明示的な allDay フラグを大きな予定とみなす
+            if (e.allDay) return true;
+            if (e.startTime === "00:00" && (e.endTime === "23:59" || e.endTime === "24:00")) return true;
+            return false;
+          };
+          const mEvents = allEventsOn(selectedDate)
+            .filter(e => e.member === m.name)
+            .sort((a, b) => {
+              const ba = isBigEvent(a) ? 0 : 1;
+              const bb = isBigEvent(b) ? 0 : 1;
+              if (ba !== bb) return ba - bb;
+              return (a.startTime || "").localeCompare(b.startTime || "");
+            });
           return (
             <div key={i} style={{ marginBottom: 8 }}>
               <div style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 4 }}>
@@ -2340,7 +2694,7 @@ function ScheduleScreen({ currentUser }) {
               </div>
             </div>
 
-            <div style={{ marginBottom: 14 }}>
+            <div style={{ marginBottom: 10 }}>
               <div style={{ fontSize: 10, fontWeight: 700, color: T.gray, fontFamily: "'Noto Sans JP', sans-serif", marginBottom: 4 }}>メモ</div>
               <textarea value={draft.memo} onChange={e => setDraft(d => ({ ...d, memo: e.target.value }))}
                 placeholder="詳細メモ（任意）"
@@ -2348,6 +2702,24 @@ function ScheduleScreen({ currentUser }) {
                   padding: "9px 12px", fontSize: 12, fontFamily: "'Noto Sans JP', sans-serif",
                   resize: "vertical", outline: "none", boxSizing: "border-box" }} />
             </div>
+
+            {/* Googleカレンダー同期オプション */}
+            {!editId && (
+              <div style={{ marginBottom: 14, background: "#E8F0FE", borderRadius: 10, padding: "10px 12px" }}>
+                <label style={{ display: "flex", alignItems: "center", gap: 8, cursor: "pointer", fontSize: 12, fontWeight: 700, color: "#4285F4", fontFamily: "'Noto Sans JP', sans-serif" }}>
+                  <input type="checkbox" checked={!!draft.syncGoogle}
+                    onChange={e => setDraft(d => ({ ...d, syncGoogle: e.target.checked }))}
+                    style={{ width: 16, height: 16, cursor: "pointer" }} />
+                  📆 Googleカレンダーにも追加する
+                </label>
+              </div>
+            )}
+            {editId && draft.source === "google" && (
+              <div style={{ marginBottom: 14, background: "#E8F0FE", borderRadius: 10, padding: "8px 12px",
+                fontSize: 11, color: "#4285F4", fontFamily: "'Noto Sans JP', sans-serif", fontWeight: 700 }}>
+                📆 Googleカレンダーの予定を編集中
+              </div>
+            )}
 
             <div style={{ display: "flex", gap: 8 }}>
               <button onClick={saveDraft} disabled={!draft.title.trim()} style={{
@@ -2416,7 +2788,7 @@ function ScheduleScreen({ currentUser }) {
 const MEMBERS = [
   { name: "栗原 優介", icon: "👨‍🌾", color: T.green },
   { name: "栗原 直人", icon: "👨‍🌾", color: T.skyL },
-  { name: "秋山 龍之介", icon: "👨‍🔧", color: T.amber },
+  { name: "秋山 龍の輔", icon: "👨‍🔧", color: T.amber },
 ];
 
 // ── LOGIN SCREEN ──
