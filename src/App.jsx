@@ -384,7 +384,7 @@ function HomeScreen({ posts, markRead, onNav, currentUser, memberNames }) {
 }
 
 // ── CLOCK ──
-function ClockScreen({ currentUser }) {
+function ClockScreen({ currentUser, onNav }) {
   const ME = currentUser?.name || "";
   const todayKey = getTodayKey();
   const [clockState, setClockState] = useState(() => getClockData(ME, todayKey));
@@ -430,6 +430,8 @@ function ClockScreen({ currentUser }) {
       setClockData(ME, todayKey, data);
       setClockState(data);
       syncClockToGas(data);
+      // 退勤後、作業記録画面に自動遷移
+      if (onNav) setTimeout(() => onNav("work"), 800);
     }
   };
 
@@ -635,7 +637,7 @@ const CLOCKIN = "07:00";
 const DAY_END = "20:00";
 const PX = 0.6;
 
-function WorkScreen({ currentUser }) {
+function WorkScreen({ currentUser, onNav }) {
   const todayStr = (() => {
     const d = new Date();
     return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,"0")}-${String(d.getDate()).padStart(2,"0")}`;
@@ -766,6 +768,8 @@ function WorkScreen({ currentUser }) {
     syncWorkToGas(selectedDate, locked);
     setDayLocked(true);
     setOpen(false);
+    // 確定後、日誌画面に自動遷移
+    if (onNav) setTimeout(() => onNav("journal"), 800);
   };
 
   const dayStart = toMin(CLOCKIN);
@@ -2343,14 +2347,18 @@ function ScheduleScreen({ currentUser }) {
       // Googleカレンダーにも追加
       if (draft.syncGoogle && GAS_URL) {
         try {
+          // 他メンバーの予定なら名前をタイトルに付与
+          const gcalTitle = (draft.member && draft.member !== ME)
+            ? `【${draft.member.split(" ")[0]}】${draft.title}`
+            : draft.title;
           await fetch(GAS_URL, {
             method: "POST",
             body: JSON.stringify({
               action: "addGoogleCalendar",
               data: {
-                title: draft.title, date: draft.date,
+                title: gcalTitle, date: draft.date,
                 startTime: draft.startTime, endTime: draft.endTime,
-                memo: draft.memo,
+                memo: (draft.member && draft.member !== ME ? `担当: ${draft.member}\n` : "") + (draft.memo || ""),
               },
             }),
           });
@@ -2710,7 +2718,8 @@ function ScheduleScreen({ currentUser }) {
                   <input type="checkbox" checked={!!draft.syncGoogle}
                     onChange={e => setDraft(d => ({ ...d, syncGoogle: e.target.checked }))}
                     style={{ width: 16, height: 16, cursor: "pointer" }} />
-                  📆 Googleカレンダーにも追加する
+                  📆 Googleカレンダーにも追加
+                  {draft.member && draft.member !== ME ? `（${draft.member.split(" ")[0]}さんの予定として）` : ""}
                 </label>
               </div>
             )}
@@ -2890,8 +2899,8 @@ export default function App() {
 
   const map = {
     home:    <HomeScreen posts={posts} markRead={markRead} onNav={setScreen} currentUser={currentUser} memberNames={MEMBER_NAMES} />,
-    clock:   <ClockScreen currentUser={currentUser} />,
-    work:    <WorkScreen currentUser={currentUser} />,
+    clock:   <ClockScreen currentUser={currentUser} onNav={setScreen} />,
+    work:    <WorkScreen currentUser={currentUser} onNav={setScreen} />,
     journal: <JournalScreen posts={posts} setPosts={setPosts} markRead={markRead} currentUser={currentUser} memberNames={MEMBER_NAMES} />,
     schedule: <ScheduleScreen currentUser={currentUser} />,
     leave:   <LeaveScreen currentUser={currentUser} />,
