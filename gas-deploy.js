@@ -68,7 +68,7 @@ function doGet(e) {
     return jsonResponse(getGoogleCalendarEvents(e.parameter.month, e.parameter.calendarId || 'primary'));
   }
 
-  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var ss = SpreadsheetApp.openById(COMPOST_SS_ID);
   if (action === 'getSchedule') return jsonResponse(getSheetData(ss, 'schedule'));
   if (action === 'getClock')    return jsonResponse(getSheetData(ss, 'clock'));
   if (action === 'getWork')     return jsonResponse(getSheetData(ss, 'work'));
@@ -121,7 +121,7 @@ function doPost(e) {
     return jsonResponse(deleteGoogleCalendarEvent(body.id, body.data && body.data.calendarId));
   }
 
-  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var ss = SpreadsheetApp.openById(COMPOST_SS_ID);
 
   if (action === 'saveSchedule')   return jsonResponse(saveRow(ss, 'schedule', body.data, ['id','title','date','startTime','endTime','category','member','memo','createdBy','updatedAt']));
   if (action === 'deleteSchedule') return jsonResponse(deleteRow(ss, 'schedule', body.id));
@@ -624,7 +624,7 @@ var REMINDER_MSG = '\u26A0\uFE0F \u6253\u523B\u3092\u5FD8\u308C\u3066\u3044\u307
 
 function checkClockReminders() {
   try {
-    var ss = SpreadsheetApp.getActiveSpreadsheet();
+    var ss = SpreadsheetApp.openById(COMPOST_SS_ID);
     if (!ss) return;
     var now = new Date();
     var dow = now.getDay();

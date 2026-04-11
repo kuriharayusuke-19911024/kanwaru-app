@@ -103,6 +103,14 @@ async function migrateLocalDataToGas() {
   return count;
 }
 
+// 強制再同期（マイグレーション済みフラグを無視して再送信）
+async function forceSyncToGas() {
+  if (!GAS_URL) return 0;
+  // フラグをリセットしてマイグレーション再実行
+  localStorage.removeItem("kanwaru_migrated");
+  return await migrateLocalDataToGas();
+}
+
 const today = new Date();
 const dateStr = `${today.getFullYear()}年${today.getMonth()+1}月${today.getDate()}日（${["日","月","火","水","木","金","土"][today.getDay()]}）`;
 
@@ -378,6 +386,26 @@ function HomeScreen({ posts, markRead, onNav, currentUser, memberNames }) {
             </div>
           </div>
         ))}
+      </Card>
+
+      {/* データ再同期ボタン */}
+      <Card style={{ padding: "12px" }}>
+        <button onClick={async () => {
+          const btn = document.getElementById("sync-btn");
+          if (btn) btn.textContent = "🔄 同期中...";
+          const count = await forceSyncToGas();
+          if (btn) btn.textContent = `✅ ${count}件 同期完了！`;
+          setTimeout(() => { if (btn) btn.textContent = "🔄 データを再同期する"; }, 3000);
+        }} id="sync-btn" style={{
+          width: "100%", background: T.grayL, color: T.gray,
+          border: "none", borderRadius: 10, padding: "10px",
+          fontSize: 11, fontWeight: 700, cursor: "pointer",
+          fontFamily: "'Noto Sans JP', sans-serif",
+        }}>🔄 データを再同期する</button>
+        <div style={{ fontSize: 9, color: "#aaa", textAlign: "center", marginTop: 4,
+          fontFamily: "'Noto Sans JP', sans-serif" }}>
+          スマホのデータをサーバーに送信します
+        </div>
       </Card>
     </div>
   );
